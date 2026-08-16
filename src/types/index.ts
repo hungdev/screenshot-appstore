@@ -136,6 +136,11 @@ export interface CanvasConfig {
   deviceVariant: 'light' | 'dark'
   deviceAngle?: DeviceAngle
   deviceRotation?: DeviceRotation
+  deviceX?: number
+  deviceY?: number
+  deviceScale?: number
+  outputWidth?: number
+  outputHeight?: number
   background: Background
   overlays: Overlay[]
   zoom: number

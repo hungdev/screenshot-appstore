@@ -25,12 +25,12 @@ const panels: PanelSection[] = [
 ]
 
 export default function Sidebar() {
-  const [expandedPanel, setExpandedPanel] = useState<PanelId>('device')
+  const [expandedPanel, setExpandedPanel] = useState<PanelId | null>('device')
   const { user } = useAppStore()
   const navigate = useNavigate()
 
   const togglePanel = (id: PanelId) => {
-    setExpandedPanel(expandedPanel === id ? id : id)
+    setExpandedPanel((current) => (current === id ? null : id))
   }
 
   return (

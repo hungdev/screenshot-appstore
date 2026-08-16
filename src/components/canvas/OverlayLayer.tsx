@@ -56,6 +56,7 @@ function TextOverlayNode({ overlay, isSelected, onSelect }: OverlayNodeProps) {
         fontFamily={overlay.fontFamily ?? 'Inter, system-ui, sans-serif'}
         fontStyle={overlay.fontWeight === 700 ? 'bold' : overlay.fontWeight === 500 ? '500' : 'normal'}
         fill={overlay.fill ?? '#FFFFFF'}
+        name="overlay-node"
         align={overlay.align ?? 'center'}
         rotation={overlay.rotation}
         draggable
@@ -69,6 +70,7 @@ function TextOverlayNode({ overlay, isSelected, onSelect }: OverlayNodeProps) {
       {isSelected && (
         <Transformer
           ref={trRef}
+          name="overlay-control"
           boundBoxFunc={(_, newBox) => ({
             ...newBox,
             width: Math.max(20, newBox.width),
@@ -124,6 +126,7 @@ function BadgeOverlayNode({ overlay, isSelected, onSelect }: OverlayNodeProps) {
         width={overlay.width}
         height={overlay.height}
         image={image}
+        name="overlay-node"
         rotation={overlay.rotation}
         draggable
         onMouseDown={(e) => {
@@ -136,6 +139,7 @@ function BadgeOverlayNode({ overlay, isSelected, onSelect }: OverlayNodeProps) {
       {isSelected && (
         <Transformer
           ref={trRef}
+          name="overlay-control"
           enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right']}
           boundBoxFunc={(_, newBox) => ({
             ...newBox,

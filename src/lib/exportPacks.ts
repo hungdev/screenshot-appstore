@@ -17,12 +17,16 @@ export const exportPacks: ExportPack[] = [
   {
     id: 'app-store',
     name: 'App Store',
-    description: 'iPhone screenshots for App Store',
+    description: 'App Store screenshot sizes',
     sizes: [
       { label: 'iPhone 17 Pro Max', width: 1320, height: 2868, filename: 'app-store-6.9', deviceId: 'iphone-17-pro-max' },
       { label: 'iPhone 16 Pro Max', width: 1320, height: 2868, filename: 'app-store-6.7', deviceId: 'iphone-16-pro-max' },
       { label: 'iPhone 15 Pro', width: 1179, height: 2556, filename: 'app-store-6.1', deviceId: 'iphone-15-pro' },
-      { label: 'iPhone 8 Plus', width: 1242, height: 2208, filename: 'app-store-5.5', deviceId: 'iphone-8-plus-space-grey' }
+      { label: 'iPhone 8 Plus', width: 1242, height: 2208, filename: 'app-store-5.5', deviceId: 'iphone-8-plus-space-grey' },
+      { label: '6.5-inch portrait', width: 1242, height: 2688, filename: 'app-store-1242x2688' },
+      { label: '6.5-inch landscape', width: 2688, height: 1242, filename: 'app-store-2688x1242' },
+      { label: '6.7-inch portrait', width: 1284, height: 2778, filename: 'app-store-1284x2778' },
+      { label: '6.7-inch landscape', width: 2778, height: 1284, filename: 'app-store-2778x1284' }
     ]
   },
   {

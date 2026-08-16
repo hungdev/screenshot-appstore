@@ -1,8 +1,55 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Button from '../ui/Button'
 import { toast } from '../layout/Toaster'
 import { exportPacks } from '../../lib/exportPacks'
-import type { ExportSize } from '../../lib/exportPacks'
+import { useCanvasStore } from '../../store/useCanvasStore'
+
+interface RenderedExport {
+  dataURL: string
+  filename: string
+  format: 'png' | 'webp'
+}
+
+async function saveExport(dataURL: string, filename: string, format: 'png' | 'webp') {
+  const base64 = dataURL.replace(/^data:image\/\w+;base64,/, '')
+  if (window.frameup?.export?.png) {
+    return window.frameup.export.png({ base64, filename, format })
+  }
+
+  // The Vite/web preview does not have Electron's preload bridge. Keep export
+  // useful there by downloading the exact same rendered file in the browser.
+  const link = document.createElement('a')
+  link.href = dataURL
+  link.download = filename
+  link.style.display = 'none'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  return { success: true }
+}
+
+async function saveBatchExports(exports: RenderedExport[]) {
+  if (window.frameup?.export?.batch) {
+    return window.frameup.export.batch(exports.map(({ dataURL, filename, format }) => ({
+      base64: dataURL.replace(/^data:image\/\w+;base64,/, ''),
+      filename,
+      format
+    })))
+  }
+
+  // Web fallback: browsers do not expose a folder picker compatible with the
+  // Electron batch IPC, so download each selected export.
+  for (const item of exports) {
+    const link = document.createElement('a')
+    link.href = item.dataURL
+    link.download = item.filename
+    link.style.display = 'none'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
+  return { success: true }
+}
 
 export default function ExportPanel() {
   const [exporting, setExporting] = useState(false)
@@ -10,14 +57,31 @@ export default function ExportPanel() {
   const [selectedSizes, setSelectedSizes] = useState<Set<number>>(new Set())
   const [batchExporting, setBatchExporting] = useState(false)
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 })
+  const [customWidth, setCustomWidth] = useState('1242')
+  const [customHeight, setCustomHeight] = useState('2688')
+  const [customExporting, setCustomExporting] = useState(false)
+  const { outputWidth, outputHeight, setOutputDimensions } = useCanvasStore()
 
   const [format, setFormat] = useState<'png' | 'webp'>('png')
+
+  useEffect(() => {
+    setCustomWidth(String(outputWidth))
+    setCustomHeight(String(outputHeight))
+  }, [outputWidth, outputHeight])
 
   const setExportMime = (fmt: 'png' | 'webp') => {
     window.__canvasExportMime = fmt === 'webp' ? 'image/webp' : 'image/png'
   }
 
   const getCanvasExport = () => window.__canvasExport
+
+  const applyCustomSizeToCanvas = () => {
+    const width = Number.parseInt(customWidth, 10)
+    const height = Number.parseInt(customHeight, 10)
+    if (Number.isInteger(width) && Number.isInteger(height) && width > 0 && height > 0) {
+      setOutputDimensions(width, height)
+    }
+  }
 
   const handleExport = async () => {
     setExporting(true)
@@ -37,13 +101,11 @@ export default function ExportPanel() {
         return
       }
 
-      const base64 = (dataURL as string).replace(/^data:image\/\w+;base64,/, '')
-
-      const result = await window.frameup.export.png({
-        base64,
-        filename: `frameup-export-${Date.now()}.${format}`,
+      const result = await saveExport(
+        dataURL as string,
+        `frameup-export-${Date.now()}.${format}`,
         format
-      })
+      )
 
       if (!result.success) {
         if (result.error !== 'Cancelled') toast.error(result.error ?? 'Export failed')
@@ -79,21 +141,23 @@ export default function ExportPanel() {
 
       // Generate exports at each target size (async for device overrides)
       setExportMime(format)
-      const jobs = []
+      const jobs: RenderedExport[] = []
       for (let i = 0; i < sizes.length; i++) {
         const size = sizes[i]
         setBatchProgress({ current: i + 1, total: sizes.length })
         const result = exportFn(size.width, size.height, size.deviceId)
         const dataURL = result instanceof Promise ? await result : result
-        const base64 = dataURL?.replace(/^data:image\/\w+;base64,/, '') ?? ''
+        if (!dataURL) {
+          throw new Error(`Could not render ${size.label}`)
+        }
         jobs.push({
-          base64,
+          dataURL,
           filename: `${size.filename}.${format}`,
           format
         })
       }
 
-      const result = await window.frameup.export.batch(jobs)
+      const result = await saveBatchExports(jobs)
       if (result.success) {
         toast.success(`Exported ${sizes.length} files`)
       } else {
@@ -105,6 +169,49 @@ export default function ExportPanel() {
     setBatchExporting(false)
   }
 
+  const handleCustomExport = async () => {
+    const width = Number.parseInt(customWidth, 10)
+    const height = Number.parseInt(customHeight, 10)
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
+      toast.error('Enter a valid width and height')
+      return
+    }
+    if (width > 16384 || height > 16384) {
+      toast.error('Maximum export size is 16,384 px per side')
+      return
+    }
+
+    setCustomExporting(true)
+    try {
+      const exportFn = getCanvasExport()
+      if (!exportFn) {
+        toast.error('No canvas to export')
+        return
+      }
+      setExportMime(format)
+      const result = exportFn(width, height)
+      const dataURL = result instanceof Promise ? await result : result
+      if (!dataURL) {
+        toast.error('Export failed — canvas is empty')
+        return
+      }
+      const response = await saveExport(
+        dataURL,
+        `frameup-${width}x${height}.${format}`,
+        format
+      )
+      if (!response.success) {
+        if (response.error !== 'Cancelled') toast.error(response.error ?? 'Export failed')
+      } else {
+        toast.success(`Exported ${width} × ${height}`)
+      }
+    } catch {
+      toast.error('Export failed')
+    } finally {
+      setCustomExporting(false)
+    }
+  }
+
   const toggleSize = (index: number) => {
     setSelectedSizes((prev) => {
       const next = new Set(prev)
@@ -114,8 +221,8 @@ export default function ExportPanel() {
     })
   }
 
-  const selectAllSizes = (pack: typeof exportPacks[number]) => {
-    setSelectedSizes(new Set(pack.sizes.map((_, i) => i)))
+  const clearSelectedSizes = () => {
+    setSelectedSizes(new Set())
   }
 
   return (
@@ -152,6 +259,57 @@ export default function ExportPanel() {
       <div className="border-t border-border pt-3">
         <div className="mb-2 text-xs text-text-secondary">Batch export</div>
 
+        {/* Custom size */}
+        <div className="mb-4 rounded-lg border border-border bg-surface/40 p-3">
+          <div className="mb-2 flex items-baseline justify-between">
+            <span className="text-xs font-medium text-primary">Custom size</span>
+            <span className="text-[10px] text-text-tertiary">pixels</span>
+          </div>
+          <div className="flex items-end gap-2">
+            <label className="min-w-0 flex-1">
+              <span className="mb-1 block text-[10px] text-text-secondary">Width</span>
+              <input
+                type="number"
+                min="1"
+                max="16384"
+                inputMode="numeric"
+                value={customWidth}
+                onChange={(event) => setCustomWidth(event.target.value)}
+                onBlur={applyCustomSizeToCanvas}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') event.currentTarget.blur()
+                }}
+                className="w-full rounded-md border border-border bg-white px-2 py-1.5 text-xs text-primary outline-none focus:border-primary"
+              />
+            </label>
+            <span className="pb-1.5 text-xs text-text-tertiary">×</span>
+            <label className="min-w-0 flex-1">
+              <span className="mb-1 block text-[10px] text-text-secondary">Height</span>
+              <input
+                type="number"
+                min="1"
+                max="16384"
+                inputMode="numeric"
+                value={customHeight}
+                onChange={(event) => setCustomHeight(event.target.value)}
+                onBlur={applyCustomSizeToCanvas}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') event.currentTarget.blur()
+                }}
+                className="w-full rounded-md border border-border bg-white px-2 py-1.5 text-xs text-primary outline-none focus:border-primary"
+              />
+            </label>
+          </div>
+          <Button
+            variant="secondary"
+            onClick={handleCustomExport}
+            loading={customExporting}
+            className="mt-2 w-full"
+          >
+            Export custom size
+          </Button>
+        </div>
+
         {/* Pack selector */}
         <div className="flex flex-col gap-1.5 mb-3">
           {exportPacks.map((pack) => (
@@ -159,7 +317,7 @@ export default function ExportPanel() {
               key={pack.id}
               onClick={() => {
                 setSelectedPack(pack.id)
-                selectAllSizes(pack)
+                clearSelectedSizes()
               }}
               className={`rounded-lg border px-3 py-2 text-left transition-colors ${
                 selectedPack === pack.id
@@ -186,7 +344,10 @@ export default function ExportPanel() {
                   <input
                     type="checkbox"
                     checked={selectedSizes.has(i)}
-                    onChange={() => toggleSize(i)}
+                    onChange={(event) => {
+                      toggleSize(i)
+                      if (event.target.checked) setOutputDimensions(size.width, size.height)
+                    }}
                     className="rounded border-border"
                   />
                   <span className="text-xs text-primary">{size.label}</span>

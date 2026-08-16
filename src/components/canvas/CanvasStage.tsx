@@ -1,5 +1,5 @@
 import { useRef, useEffect, useCallback, useMemo, useState } from 'react'
-import { Stage, Layer, Rect, Image as KonvaImage, Group } from 'react-konva'
+import { Stage, Layer, Rect, Image as KonvaImage, Group, Transformer } from 'react-konva'
 import Konva from 'konva'
 import { useCanvasStore } from '../../store/useCanvasStore'
 import { getDeviceById } from '../../lib/devices'
@@ -8,7 +8,7 @@ import { renderDeviceBody, roundedRectPath } from '../../lib/deviceBody'
 import { useImageLoader } from './useImageLoader'
 import OverlayLayer from './OverlayLayer'
 
-// Export dimensions — the actual mockup output size (device + padding)
+// Used only by the legacy per-device batch override renderer.
 const EXPORT_PADDING = 80
 
 /** Load an image and return a promise that resolves to the HTMLImageElement */
@@ -25,8 +25,12 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 export default function CanvasStage() {
   const stageRef = useRef<Konva.Stage>(null)
   const exportLayerRef = useRef<Konva.Layer>(null)
+  const deviceGroupRef = useRef<Konva.Group>(null)
+  const deviceTransformerRef = useRef<Konva.Transformer>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const hasFittedArtboardRef = useRef(false)
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null)
+  const [isDeviceSelected, setIsDeviceSelected] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
   const panStartRef = useRef<{ x: number; y: number; stageX: number; stageY: number } | null>(null)
   const {
@@ -38,6 +42,11 @@ export default function CanvasStage() {
     deviceVariant,
     deviceAngle,
     deviceRotation,
+    deviceX,
+    deviceY,
+    deviceScale,
+    outputWidth,
+    outputHeight,
     background,
     deviceShadow,
     screenshotCornerRadius,
@@ -49,7 +58,7 @@ export default function CanvasStage() {
     setZoom,
     setStagePosition,
     setCanvasDimensions,
-    setScreenshotOffset
+    setDeviceTransform
   } = useCanvasStore()
 
   const device = getDeviceById(selectedDeviceId)
@@ -61,9 +70,8 @@ export default function CanvasStage() {
       : getDeviceAnglePreset(device, deviceAngle)),
     [device, deviceAngle, deviceRotation]
   )
-  const angledBounds = device ? getAngledDeviceBounds(device, deviceAnglePreset) : { width: 920, height: 1760 }
-  const exportWidth = angledBounds.width + EXPORT_PADDING * 2
-  const exportHeight = angledBounds.height + EXPORT_PADDING * 2
+  const exportWidth = outputWidth
+  const exportHeight = outputHeight
 
   // Load screenshot image
   const screenshotImage = useImageLoader(
@@ -79,6 +87,25 @@ export default function CanvasStage() {
     () => renderDeviceBody(device, frameImage, deviceAnglePreset),
     [device, frameImage, deviceAnglePreset]
   )
+
+  useEffect(() => {
+    const transformer = deviceTransformerRef.current
+    const group = deviceGroupRef.current
+    if (!transformer || !group) return
+    transformer.nodes(isDeviceSelected ? [group] : [])
+    transformer.getLayer()?.batchDraw()
+  }, [isDeviceSelected, device, deviceX, deviceY, deviceScale])
+
+  // Switching a preset or applying a custom size changes the real artboard,
+  // so fit it back into view for immediate composition feedback.
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+    const { width, height } = container.getBoundingClientRect()
+    if (width <= 0 || height <= 0) return
+    setZoom(Math.min(width / exportWidth, height / exportHeight) * 0.82)
+    setStagePosition(0, 0)
+  }, [exportWidth, exportHeight, setStagePosition, setZoom])
 
   // Compute screenshot dimensions (fit to screen width)
   const ssWidth = device ? device.screenBounds.width : 0
@@ -98,6 +125,18 @@ export default function CanvasStage() {
     ): string | null | Promise<string | null> => {
       const layer = exportLayerRef.current
       if (!layer) return null
+
+      // Selection controls are editor-only. Hide them while taking a snapshot
+      // of the export layer; destroying cloned Transformer nodes can detach
+      // listeners from the live nodes they reference.
+      const cloneExportLayer = () => {
+        const transformers = layer.find('Transformer')
+        const visibility = transformers.map((node) => node.visible())
+        transformers.forEach((node) => node.visible(false))
+        const clone = layer.clone()
+        transformers.forEach((node, index) => node.visible(visibility[index]))
+        return clone
+      }
 
       // Device-override batch export: build a fresh offscreen render with the target device
       if (targetHeight !== undefined && overrideDeviceId) {
@@ -291,30 +330,47 @@ export default function CanvasStage() {
       }
 
       if (targetHeight !== undefined) {
-        // Batch export mode (no device override): scale current canvas
+        // Render the fixed artboard at its native size first, then composite it
+        // into the requested output canvas. Rendering directly from a cloned,
+        // transformed Konva layer can fail when an active Transformer is present.
         const targetWidth = widthOrRatio
         const scaleX = targetWidth / exportWidth
         const scaleY = targetHeight / exportHeight
         const scale = Math.min(scaleX, scaleY)
 
-        const offscreen = new Konva.Stage({
+        const sourceStage = new Konva.Stage({
           container: document.createElement('div'),
-          width: targetWidth,
-          height: targetHeight
+          width: exportWidth,
+          height: exportHeight
         })
 
-        const clone = layer.clone()
-        const scaledW = exportWidth * scale
-        const scaledH = exportHeight * scale
-        const ox = (targetWidth - scaledW) / 2
-        const oy = (targetHeight - scaledH) / 2
-        clone.position({ x: ox, y: oy })
-        clone.scale({ x: scale, y: scale })
-        offscreen.add(clone)
+        const clone = cloneExportLayer()
+        clone.position({ x: 0, y: 0 })
+        clone.scale({ x: 1, y: 1 })
+        sourceStage.add(clone)
+
+        const sourceCanvas = sourceStage.toCanvas({ pixelRatio: 1 })
+        const outputCanvas = document.createElement('canvas')
+        outputCanvas.width = targetWidth
+        outputCanvas.height = targetHeight
+        const context = outputCanvas.getContext('2d')
+        if (!context) {
+          sourceStage.destroy()
+          return null
+        }
+        const scaledWidth = exportWidth * scale
+        const scaledHeight = exportHeight * scale
+        context.drawImage(
+          sourceCanvas,
+          (targetWidth - scaledWidth) / 2,
+          (targetHeight - scaledHeight) / 2,
+          scaledWidth,
+          scaledHeight
+        )
 
         const mime = window.__canvasExportMime
-        const dataURL = offscreen.toDataURL({ pixelRatio: 1, mimeType: mime || 'image/png' })
-        offscreen.destroy()
+        const dataURL = outputCanvas.toDataURL(mime || 'image/png')
+        sourceStage.destroy()
         return dataURL
       }
 
@@ -326,7 +382,7 @@ export default function CanvasStage() {
         height: exportHeight
       })
 
-      const clone = layer.clone()
+      const clone = cloneExportLayer()
       clone.position({ x: 0, y: 0 })
       clone.scale({ x: 1, y: 1 })
       offscreen.add(clone)
@@ -356,11 +412,16 @@ export default function CanvasStage() {
       for (const entry of entries) {
         const { width, height } = entry.contentRect
         setCanvasDimensions(Math.round(width), Math.round(height))
+        if (!hasFittedArtboardRef.current && width > 0 && height > 0) {
+          hasFittedArtboardRef.current = true
+          setZoom(Math.min(width / exportWidth, height / exportHeight) * 0.82)
+          setStagePosition(0, 0)
+        }
       }
     })
     observer.observe(container)
     return () => observer.disconnect()
-  }, [setCanvasDimensions])
+  }, [exportWidth, exportHeight, setCanvasDimensions, setStagePosition, setZoom])
 
   // Zoom toward cursor with Cmd+scroll
   const handleWheel = useCallback(
@@ -411,8 +472,34 @@ export default function CanvasStage() {
           panStartRef.current = { x: e.evt.clientX, y: e.evt.clientY, stageX, stageY }
           stage.container().style.cursor = 'grabbing'
         }
-      } else if (e.target === e.target.getStage()) {
-        setSelectedOverlayId(null)
+      } else {
+        // A background click targets the artboard Rect, not the Stage itself.
+        // Walk up the Konva tree so only clicks outside the device and its
+        // resize controls clear the selected state.
+        const isInside = (root: Konva.Node | null) => {
+          let current: Konva.Node | null = e.target
+          while (current) {
+            if (current === root) return true
+            current = current.getParent()
+          }
+          return false
+        }
+        const clickedDevice = isInside(deviceGroupRef.current)
+        const clickedDeviceControl = isInside(deviceTransformerRef.current)
+        const clickedOverlay = (() => {
+          let current: Konva.Node | null = e.target
+          while (current) {
+            if (current.hasName('overlay-node') || current.hasName('overlay-control')) return true
+            current = current.getParent()
+          }
+          return false
+        })()
+        if (!clickedDevice && !clickedDeviceControl) {
+          setIsDeviceSelected(false)
+        }
+        if (!clickedOverlay) {
+          setSelectedOverlayId(null)
+        }
       }
     },
     [stageX, stageY]
@@ -482,40 +569,15 @@ export default function CanvasStage() {
   // Background colors for Konva gradient
   const bgColors = background.colors ?? ['#e0e0e0', '#bdbdbd']
 
-  // Screenshot drag handler — constrain so screenshot always covers the screen
-  const handleScreenshotDrag = useCallback(
-    (e: Konva.KonvaEventObject<DragEvent>) => {
-      if (!device) return
-      const node = e.target
-      const sb = device.screenBounds
-
-      // Compute how much the screenshot can move
-      const maxX = sb.x
-      const minX = sb.x + sb.width - ssWidth
-      const maxY = sb.y
-      const minY = sb.y + sb.height - ssHeight
-
-      // Clamp position
-      let x = node.x()
-      let y = node.y()
-      x = Math.max(Math.min(minX, maxX), Math.min(x, Math.max(minX, maxX)))
-      y = Math.max(Math.min(minY, maxY), Math.min(y, Math.max(minY, maxY)))
-
-      node.x(x)
-      node.y(y)
-    },
-    [device, ssWidth, ssHeight]
-  )
-
-  const handleScreenshotDragEnd = useCallback(
-    (e: Konva.KonvaEventObject<DragEvent>) => {
-      if (!device) return
-      const node = e.target
-      const sb = device.screenBounds
-      setScreenshotOffset(node.x() - sb.x, node.y() - sb.y)
-    },
-    [device, setScreenshotOffset]
-  )
+  const handleDeviceTransformEnd = useCallback(() => {
+    const node = deviceGroupRef.current
+    if (!node) return
+    // Corner handles preserve proportions, but use scaleX defensively so a
+    // programmatic transform cannot ever stretch the device frame.
+    const scale = Math.max(0.1, Math.min(4, node.scaleX()))
+    node.scale({ x: scale, y: scale })
+    setDeviceTransform(node.x(), node.y(), scale)
+  }, [setDeviceTransform])
 
   const isMac = navigator.platform?.includes('Mac') ?? true
   const modKey = isMac ? '\u2318' : 'Ctrl'
@@ -524,7 +586,8 @@ export default function CanvasStage() {
     <div ref={containerRef} className="relative h-full w-full">
       {/* Keybind tooltip */}
       <div className="absolute bottom-3 right-3 z-10 flex gap-3 rounded-lg bg-black/60 px-3 py-1.5 text-[10px] text-white/70 backdrop-blur-sm pointer-events-none select-none">
-        <span>Drag: Move screenshot</span>
+        <span>Click device: resize · Drag device: move</span>
+        <span>Device clips at frame edge</span>
         <span>{modKey}+Scroll: Zoom</span>
         <span>{modKey}+Drag: Pan</span>
         <span>{modKey}+0: Fit</span>
@@ -543,10 +606,34 @@ export default function CanvasStage() {
         {/* Workspace background (not exported) */}
         <Layer>
           <Rect x={0} y={0} width={canvasWidth} height={canvasHeight} fill="#E5E7EB" />
+          <Rect
+            x={offsetX - 1}
+            y={offsetY - 1}
+            width={exportWidth * zoom + 2}
+            height={exportHeight * zoom + 2}
+            fill="#FFFFFF"
+            stroke="#CBD5E1"
+            strokeWidth={1}
+            shadowColor="#64748B"
+            shadowBlur={18}
+            shadowOpacity={0.16}
+            shadowOffsetY={5}
+            listening={false}
+          />
         </Layer>
 
         {/* Export layer — this is what gets exported */}
-        <Layer ref={exportLayerRef} x={offsetX} y={offsetY} scaleX={zoom} scaleY={zoom}>
+        <Layer
+          ref={exportLayerRef}
+          x={offsetX}
+          y={offsetY}
+          scaleX={zoom}
+          scaleY={zoom}
+          clipX={0}
+          clipY={0}
+          clipWidth={exportWidth}
+          clipHeight={exportHeight}
+        >
           {/* Mockup background */}
           {background.type === 'transparent' ? null : background.type === 'image' && bgImage ? (
             <KonvaImage
@@ -580,30 +667,52 @@ export default function CanvasStage() {
           )}
 
           {/* Side wall of the body, drawn behind the face it is extruded from. */}
-          {deviceBody && (
-            <KonvaImage
-              image={deviceBody.canvas}
-              x={exportWidth / 2 + deviceBody.x}
-              y={exportHeight / 2 + deviceBody.y}
-              width={deviceBody.width}
-              height={deviceBody.height}
-              listening={false}
-            />
-          )}
-
-          {/* The entire device transforms as one object so the frame, screen, island and shadow stay aligned. */}
+          {/* The device is an independent object on the fixed artboard. The layer clip
+              is intentional: moving it past an edge crops it, never resizes the artboard. */}
           {device && (
           <Group
-            x={exportWidth / 2}
-            y={exportHeight / 2}
-            offsetX={device.width / 2}
-            offsetY={device.height / 2}
-            rotation={deviceAnglePreset.rotation}
-            scaleX={deviceAnglePreset.scaleX}
-            scaleY={deviceAnglePreset.scaleY}
-            skewX={deviceAnglePreset.skewX}
-            skewY={deviceAnglePreset.skewY}
+            ref={deviceGroupRef}
+            x={deviceX}
+            y={deviceY}
+            scaleX={deviceScale}
+            scaleY={deviceScale}
+            draggable
+            onClick={() => { setIsDeviceSelected(true); setSelectedOverlayId(null) }}
+            onTap={() => { setIsDeviceSelected(true); setSelectedOverlayId(null) }}
+            onDragEnd={handleDeviceTransformEnd}
+            onTransformEnd={handleDeviceTransformEnd}
           >
+            {deviceBody && (
+              <KonvaImage
+                image={deviceBody.canvas}
+                x={deviceBody.x}
+                y={deviceBody.y}
+                width={deviceBody.width}
+                height={deviceBody.height}
+                listening={false}
+              />
+            )}
+            <Group
+              x={0}
+              y={0}
+              offsetX={device.width / 2}
+              offsetY={device.height / 2}
+              rotation={deviceAnglePreset.rotation}
+              scaleX={deviceAnglePreset.scaleX}
+              scaleY={deviceAnglePreset.scaleY}
+              skewX={deviceAnglePreset.skewX}
+              skewY={deviceAnglePreset.skewY}
+            >
+            {/* A transparent hit surface makes the complete device draggable.
+                The visual frame and screenshot are non-listening so neither
+                can steal this interaction from the outer draggable group. */}
+            <Rect
+              x={0}
+              y={0}
+              width={device.width}
+              height={device.height}
+              fill="rgba(0, 0, 0, 0.001)"
+            />
             {deviceShadow && (
               <Rect
                 x={0}
@@ -640,9 +749,7 @@ export default function CanvasStage() {
                   y={device.screenBounds.y + screenshotOffsetY}
                   width={ssWidth}
                   height={ssHeight}
-                  draggable
-                  onDragMove={handleScreenshotDrag}
-                  onDragEnd={handleScreenshotDragEnd}
+                  listening={false}
                 />
               </Group>
             )}
@@ -683,6 +790,7 @@ export default function CanvasStage() {
                 cornerRadius={screenshotCornerRadius ?? device.cornerRadius}
               />
             )}
+            </Group>
           </Group>
           )}
 
@@ -691,6 +799,24 @@ export default function CanvasStage() {
             selectedOverlayId={selectedOverlayId}
             onSelectOverlay={setSelectedOverlayId}
           />
+          {device && (
+            <Transformer
+              ref={deviceTransformerRef}
+              rotateEnabled={false}
+              keepRatio
+              enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right']}
+              boundBoxFunc={(oldBox, newBox) => {
+                const minSize = 48
+                return Math.abs(newBox.width) < minSize || Math.abs(newBox.height) < minSize ? oldBox : newBox
+              }}
+              borderStroke="#2563EB"
+              borderDash={[5, 4]}
+              anchorFill="#FFFFFF"
+              anchorStroke="#2563EB"
+              anchorSize={9}
+              visible={isDeviceSelected}
+            />
+          )}
         </Layer>
       </Stage>
     </div>

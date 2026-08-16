@@ -19,6 +19,14 @@ interface CanvasState {
   deviceVariant: 'light' | 'dark'
   deviceAngle: DeviceAngle
   deviceRotation: DeviceRotation
+  // Device transform inside the fixed-size export artboard.
+  deviceX: number
+  deviceY: number
+  deviceScale: number
+
+  // Export artboard pixels (independent of the editor viewport size).
+  outputWidth: number
+  outputHeight: number
 
   // Background
   background: Background
@@ -48,6 +56,8 @@ interface CanvasState {
   setDeviceVariant: (variant: 'light' | 'dark') => void
   setDeviceAngle: (angle: DeviceAngle) => void
   setDeviceRotation: (rotation: DeviceRotation) => void
+  setDeviceTransform: (x: number, y: number, scale: number) => void
+  setOutputDimensions: (width: number, height: number) => void
   setBackground: (background: Background) => void
   setZoom: (zoom: number) => void
   setStagePosition: (x: number, y: number) => void
@@ -73,6 +83,11 @@ export const useCanvasStore = create<CanvasState>((set): CanvasState => ({
   deviceVariant: 'light',
   deviceAngle: 'front',
   deviceRotation: { yaw: 0, pitch: 0, roll: 0 },
+  deviceX: 960,
+  deviceY: 540,
+  deviceScale: 0.75,
+  outputWidth: 1242,
+  outputHeight: 2688,
 
   background: backgroundPresets[0],
 
@@ -102,6 +117,25 @@ export const useCanvasStore = create<CanvasState>((set): CanvasState => ({
 
   setDeviceAngle: (angle) => set({ deviceAngle: angle, hasUnsavedChanges: true }),
   setDeviceRotation: (deviceRotation) => set({ deviceRotation, hasUnsavedChanges: true }),
+  setDeviceTransform: (deviceX, deviceY, deviceScale) => set({
+    deviceX,
+    deviceY,
+    deviceScale: Math.max(0.1, Math.min(4, deviceScale)),
+    hasUnsavedChanges: true
+  }),
+  setOutputDimensions: (outputWidth, outputHeight) => set((state) => {
+    const width = Math.max(1, Math.round(outputWidth))
+    const height = Math.max(1, Math.round(outputHeight))
+    const heightScale = height / state.outputHeight
+    return {
+      outputWidth: width,
+      outputHeight: height,
+      deviceX: (state.deviceX / state.outputWidth) * width,
+      deviceY: (state.deviceY / state.outputHeight) * height,
+      deviceScale: Math.max(0.1, Math.min(4, state.deviceScale * heightScale)),
+      hasUnsavedChanges: true
+    }
+  }),
 
   setBackground: (background) => set({ background, hasUnsavedChanges: true }),
 
@@ -135,6 +169,11 @@ export const useCanvasStore = create<CanvasState>((set): CanvasState => ({
       deviceVariant: state.deviceVariant,
       deviceAngle: state.deviceAngle,
       deviceRotation: state.deviceRotation,
+      deviceX: state.deviceX,
+      deviceY: state.deviceY,
+      deviceScale: state.deviceScale,
+      outputWidth: state.outputWidth,
+      outputHeight: state.outputHeight,
       background: state.background,
       overlays: state.overlays,
       zoom: state.zoom,
