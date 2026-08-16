@@ -178,7 +178,7 @@ export default function Settings() {
             </div>
             <button
               onClick={() => {
-                const url = 'https://github.com/amirmun99/FrameUp-Free'
+                const url = 'https://github.com/hungdev/screenshot-appstore'
                 if (frameup?.shell) void frameup.shell.openExternal(url)
                 else window.open(url, '_blank', 'noopener,noreferrer')
               }}
@@ -186,6 +186,21 @@ export default function Settings() {
             >
               View on GitHub
             </button>
+            <p className="mb-3 text-[11px] leading-relaxed text-text-tertiary">
+              Credit: based on the original{' '}
+              <button
+                type="button"
+                className="underline hover:text-primary"
+                onClick={() => {
+                  const url = 'https://github.com/amirmun99/FrameUp-Free'
+                  if (frameup?.shell) void frameup.shell.openExternal(url)
+                  else window.open(url, '_blank', 'noopener,noreferrer')
+                }}
+              >
+                FrameUp Free by amirmun99
+              </button>
+              .
+            </p>
             <Button
               variant="secondary"
               size="sm"

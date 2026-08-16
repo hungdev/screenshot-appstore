@@ -1,6 +1,8 @@
 import { ReactNode } from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useCanvasStore } from '../../store/useCanvasStore'
+import { EditorPanelProvider, useEditorPanel } from '../sidebar/EditorPanelContext'
+import type { PanelId } from '../sidebar/Sidebar'
 
 // Icons as simple SVG components
 function PlusIcon() {
@@ -67,6 +69,16 @@ function SettingsIcon({ filled }: { filled?: boolean }) {
   )
 }
 
+function ExportIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10 3v9" />
+      <path d="m6.5 6.5 3.5-3.5 3.5 3.5" />
+      <path d="M4 10.5V15a1 1 0 001 1h10a1 1 0 001-1v-4.5" />
+    </svg>
+  )
+}
+
 interface NavItemProps {
   to: string
   icon: (props: { filled?: boolean }) => JSX.Element
@@ -96,7 +108,42 @@ function NavItem({ to, icon: Icon, label }: NavItemProps) {
   )
 }
 
+function EditorTab({ panel, label, children }: { panel: PanelId; label: string; children: ReactNode }) {
+  const { activePanel, setActivePanel } = useEditorPanel()
+  const navigate = useNavigate()
+  const isActive = activePanel === panel
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        setActivePanel(panel)
+        navigate('/editor')
+      }}
+      aria-label={label}
+      title={label}
+      className={`group relative flex h-10 w-10 items-center justify-center rounded-lg transition-colors duration-120 ${
+        isActive ? 'bg-surface text-primary' : 'text-text-secondary hover:bg-surface hover:text-primary'
+      }`}
+    >
+      {isActive && <div className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r bg-primary" />}
+      {children}
+      <span className="pointer-events-none absolute left-12 top-1/2 z-20 -translate-y-1/2 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-[11px] text-white opacity-0 shadow-lg transition-opacity duration-100 group-hover:opacity-100">
+        {label}
+      </span>
+    </button>
+  )
+}
+
 export default function AppShell({ children }: { children: ReactNode }) {
+  return (
+    <EditorPanelProvider>
+      <AppShellContent>{children}</AppShellContent>
+    </EditorPanelProvider>
+  )
+}
+
+function AppShellContent({ children }: { children: ReactNode }) {
   const { zoom, canvasWidth, canvasHeight } = useCanvasStore()
 
   return (
@@ -115,13 +162,18 @@ export default function AppShell({ children }: { children: ReactNode }) {
             </span>
           </NavLink>
           <NavItem to="/library" icon={GridIcon} label="Capture library" />
-          <NavItem to="/editor" icon={PaintbrushIcon} label="Canvas editor" />
+          <div className="my-2 w-6 border-t border-border" role="separator" />
+          <EditorTab panel="source" label="Source"><FolderIcon /></EditorTab>
+          <EditorTab panel="device" label="Device"><PlusIcon /></EditorTab>
+          <EditorTab panel="background" label="Background"><GridIcon /></EditorTab>
+          <EditorTab panel="overlay" label="Overlays"><PaintbrushIcon /></EditorTab>
+          <EditorTab panel="export" label="Export"><ExportIcon /></EditorTab>
           <div className="flex-1" />
           <NavItem to="/settings" icon={SettingsIcon} label="Settings" />
 
           {/* GitHub link */}
           <button
-            onClick={() => window.open('https://github.com/amirmun99/FrameUp-Free', '_blank')}
+            onClick={() => window.open('https://github.com/hungdev/screenshot-appstore', '_blank')}
             title="View on GitHub"
             className="mt-1 flex h-8 w-8 items-center justify-center rounded-lg text-text-secondary hover:text-primary hover:bg-surface transition-colors"
           >

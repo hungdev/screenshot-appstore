@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import Sidebar from '../components/sidebar/Sidebar'
+import { useEditorPanel } from '../components/sidebar/EditorPanelContext'
 import CanvasStage from '../components/canvas/CanvasStage'
 import RotationStudio from '../components/canvas/RotationStudio'
 import Modal from '../components/ui/Modal'
@@ -10,6 +11,7 @@ import { useAppStore } from '../store/useAppStore'
 import { toast } from '../components/layout/Toaster'
 
 export default function Editor() {
+  const { activePanel } = useEditorPanel()
   const [showSaveModal, setShowSaveModal] = useState(false)
   const [projectName, setProjectName] = useState('')
   const [nameError, setNameError] = useState('')
@@ -101,7 +103,7 @@ export default function Editor() {
 
   return (
     <div className="flex h-full">
-      <Sidebar />
+      <Sidebar activePanel={activePanel} />
       <div className="relative flex-1 overflow-hidden bg-surface">
         <CanvasStage />
         {rotationStudioPlacement === 'canvas' && <RotationStudio floating />}

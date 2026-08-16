@@ -46,7 +46,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
             Free & open source —{' '}
             <button
               type="button"
-              onClick={() => window.frameup.shell.openExternal('https://github.com/amirmun99/FrameUp-Free')}
+              onClick={() => window.frameup.shell.openExternal('https://github.com/hungdev/screenshot-appstore')}
               className="underline hover:text-primary transition-colors"
             >
               View on GitHub
