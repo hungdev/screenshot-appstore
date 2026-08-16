@@ -4,36 +4,38 @@ directories:
   buildResources: build
   output: dist-electron
 
-# Verify ASAR archive integrity at startup to detect tampering
-asarIntegrity: true
+extraResources:
+  - from: build/Assets.car
+    to: Assets.car
 
 # Publish releases to GitHub — electron-updater reads from here automatically
 publish:
   provider: github
-  owner: amirmun99
-  repo: frameup
+  owner: hungdev
+  repo: screenshot-appstore
 
 mac:
+  identity: "Apple Development: Hung Vu (9ZLG5T6RNH)"
+  extendInfo:
+    CFBundleIconFile: AppIcon
+    CFBundleIconName: AppIcon
   target:
     - dmg
     - zip          # zip required for macOS auto-update (Squirrel)
   category: public.app-category.developer-tools
-  icon: build/icon.icns
+  icon: AppIcon.icns
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   gatekeeperAssess: false
-  # Notarization — electron-builder v24+ handles this natively.
-  # Requires APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID in CI env.
-  notarize:
-    teamId: ${APPLE_TEAM_ID}
+  # Enable notarization in CI only after Apple credentials are configured.
+  notarize: false
 
 win:
   target:
     - nsis         # installer
     - nsis-web     # web installer (smaller download)
   icon: build/icon.ico
-  publisherName: Frameup
 
 nsis:
   oneClick: false
