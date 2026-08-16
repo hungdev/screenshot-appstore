@@ -1,8 +1,10 @@
-import { useRef, useEffect, useCallback, useState } from 'react'
+import { useRef, useEffect, useCallback, useMemo, useState } from 'react'
 import { Stage, Layer, Rect, Image as KonvaImage, Group } from 'react-konva'
 import Konva from 'konva'
 import { useCanvasStore } from '../../store/useCanvasStore'
 import { getDeviceById } from '../../lib/devices'
+import { getAngledDeviceBounds, getCustomDeviceAngle, getDeviceAnglePreset } from '../../lib/deviceAngles'
+import { renderDeviceBody, roundedRectPath } from '../../lib/deviceBody'
 import { useImageLoader } from './useImageLoader'
 import OverlayLayer from './OverlayLayer'
 
@@ -20,25 +22,6 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   })
 }
 
-/** Draw a rounded rectangle path on a canvas 2D context */
-function roundedRectPath(
-  ctx: CanvasRenderingContext2D | { beginPath: () => void; moveTo: (x: number, y: number) => void; lineTo: (x: number, y: number) => void; arcTo: (x1: number, y1: number, x2: number, y2: number, r: number) => void; closePath: () => void },
-  x: number, y: number, w: number, h: number, r: number
-) {
-  const radius = Math.min(r, w / 2, h / 2)
-  ctx.beginPath()
-  ctx.moveTo(x + radius, y)
-  ctx.lineTo(x + w - radius, y)
-  ctx.arcTo(x + w, y, x + w, y + radius, radius)
-  ctx.lineTo(x + w, y + h - radius)
-  ctx.arcTo(x + w, y + h, x + w - radius, y + h, radius)
-  ctx.lineTo(x + radius, y + h)
-  ctx.arcTo(x, y + h, x, y + h - radius, radius)
-  ctx.lineTo(x, y + radius)
-  ctx.arcTo(x, y, x + radius, y, radius)
-  ctx.closePath()
-}
-
 export default function CanvasStage() {
   const stageRef = useRef<Konva.Stage>(null)
   const exportLayerRef = useRef<Konva.Layer>(null)
@@ -53,6 +36,8 @@ export default function CanvasStage() {
     screenshotOffsetY,
     selectedDeviceId,
     deviceVariant,
+    deviceAngle,
+    deviceRotation,
     background,
     deviceShadow,
     screenshotCornerRadius,
@@ -70,8 +55,15 @@ export default function CanvasStage() {
   const device = getDeviceById(selectedDeviceId)
 
   // Export area dimensions (the actual mockup, not the workspace)
-  const exportWidth = device ? device.width + EXPORT_PADDING * 2 : 1080
-  const exportHeight = device ? device.height + EXPORT_PADDING * 2 : 1920
+  const deviceAnglePreset = useMemo(
+    () => (deviceAngle === 'custom'
+      ? getCustomDeviceAngle(device, deviceRotation)
+      : getDeviceAnglePreset(device, deviceAngle)),
+    [device, deviceAngle, deviceRotation]
+  )
+  const angledBounds = device ? getAngledDeviceBounds(device, deviceAnglePreset) : { width: 920, height: 1760 }
+  const exportWidth = angledBounds.width + EXPORT_PADDING * 2
+  const exportHeight = angledBounds.height + EXPORT_PADDING * 2
 
   // Load screenshot image
   const screenshotImage = useImageLoader(
@@ -81,6 +73,12 @@ export default function CanvasStage() {
   // Load device frame image
   const framePath = device?.assetPath[deviceVariant]
   const frameImage = useImageLoader(framePath ?? null)
+
+  // Extruded side wall — only has pixels once the device is turned away.
+  const deviceBody = useMemo(
+    () => renderDeviceBody(device, frameImage, deviceAnglePreset),
+    [device, frameImage, deviceAnglePreset]
+  )
 
   // Compute screenshot dimensions (fit to screen width)
   const ssWidth = device ? device.screenBounds.width : 0
@@ -108,8 +106,14 @@ export default function CanvasStage() {
           const overrideDevice = getDeviceById(overrideDeviceId)
           if (!overrideDevice) return null
 
-          const ovExportW = overrideDevice.width + EXPORT_PADDING * 2
-          const ovExportH = overrideDevice.height + EXPORT_PADDING * 2
+          const store = useCanvasStore.getState()
+          const overrideAngle = store.deviceAngle
+          const overrideAnglePreset = overrideAngle === 'custom'
+            ? getCustomDeviceAngle(overrideDevice, store.deviceRotation)
+            : getDeviceAnglePreset(overrideDevice, overrideAngle)
+          const overrideBounds = getAngledDeviceBounds(overrideDevice, overrideAnglePreset)
+          const ovExportW = overrideBounds.width + EXPORT_PADDING * 2
+          const ovExportH = overrideBounds.height + EXPORT_PADDING * 2
 
           // Load the device frame image for the override device
           const frameSrc = overrideDevice.assetPath[deviceVariant] ?? overrideDevice.assetPath.light
@@ -121,7 +125,6 @@ export default function CanvasStage() {
           }
 
           // Load the screenshot image
-          const store = useCanvasStore.getState()
           let ssImg: HTMLImageElement | null = null
           if (store.screenshot) {
             try {
@@ -172,20 +175,38 @@ export default function CanvasStage() {
             )
           }
 
-          const devX = EXPORT_PADDING
-          const devY = EXPORT_PADDING
+          const overrideBody = renderDeviceBody(overrideDevice, frameImg, overrideAnglePreset)
+          if (overrideBody) {
+            offLayer.add(new Konva.Image({
+              image: overrideBody.canvas,
+              x: ovExportW / 2 + overrideBody.x,
+              y: ovExportH / 2 + overrideBody.y,
+              width: overrideBody.width,
+              height: overrideBody.height,
+              listening: false
+            }))
+          }
 
-          // Device shadow
+          const deviceGroup = new Konva.Group({
+            x: ovExportW / 2,
+            y: ovExportH / 2,
+            offsetX: overrideDevice.width / 2,
+            offsetY: overrideDevice.height / 2,
+            rotation: overrideAnglePreset.rotation,
+            scaleX: overrideAnglePreset.scaleX,
+            scaleY: overrideAnglePreset.scaleY,
+            skewX: overrideAnglePreset.skewX,
+            skewY: overrideAnglePreset.skewY
+          })
+
           if (store.deviceShadow) {
-            offLayer.add(
-              new Konva.Rect({
-                x: devX, y: devY,
-                width: overrideDevice.width, height: overrideDevice.height,
-                cornerRadius: overrideDevice.cornerRadius + 5,
-                shadowColor: '#000000', shadowBlur: 40, shadowOffsetY: 12, shadowOpacity: 0.25,
-                fill: 'transparent'
-              })
-            )
+            deviceGroup.add(new Konva.Rect({
+              x: 0, y: 0,
+              width: overrideDevice.width, height: overrideDevice.height,
+              cornerRadius: overrideDevice.cornerRadius + 5,
+              shadowColor: '#000000', shadowBlur: 40, shadowOffsetY: 12, shadowOpacity: 0.25,
+              fill: 'transparent', listening: false
+            }))
           }
 
           // Screenshot clipped to screen bounds (BEHIND device frame)
@@ -193,7 +214,7 @@ export default function CanvasStage() {
             const sb = overrideDevice.screenBounds
             const cr = store.screenshotCornerRadius ?? overrideDevice.cornerRadius
             const group = new Konva.Group({
-              x: devX, y: devY,
+              x: 0, y: 0,
               clipFunc: (ctx) => { roundedRectPath(ctx as unknown as CanvasRenderingContext2D, sb.x, sb.y, sb.width, sb.height, cr) }
             })
             const batchSsH = ssImg.naturalHeight
@@ -208,14 +229,14 @@ export default function CanvasStage() {
                 height: batchSsH
               })
             )
-            offLayer.add(group)
+            deviceGroup.add(group)
           }
 
           // Device frame (ON TOP of screenshot)
           if (frameImg) {
-            offLayer.add(
+            deviceGroup.add(
               new Konva.Image({
-                image: frameImg, x: devX, y: devY,
+                image: frameImg, x: 0, y: 0,
                 width: overrideDevice.width, height: overrideDevice.height
               })
             )
@@ -224,15 +245,17 @@ export default function CanvasStage() {
           // Dynamic Island overlay for batch export
           if (overrideDevice.dynamicIslandBounds && !overrideDevice.noCutoutOf) {
             const di = overrideDevice.dynamicIslandBounds
-            offLayer.add(
+            deviceGroup.add(
               new Konva.Rect({
-                x: devX + di.x, y: devY + di.y,
+                x: di.x, y: di.y,
                 width: di.width, height: di.height,
                 cornerRadius: di.cornerRadius,
                 fill: '#000000'
               })
             )
           }
+
+          offLayer.add(deviceGroup)
 
           // Clone overlays from the current export layer
           const currentOverlays = layer.find('.overlay')
@@ -315,7 +338,7 @@ export default function CanvasStage() {
     }
 
     window.__canvasExport = exportFn
-  }, [exportWidth, exportHeight, screenshot, deviceVariant, selectedDeviceId, background, screenshotOffsetX, screenshotOffsetY, screenshotCornerRadius])
+  }, [exportWidth, exportHeight, screenshot, deviceVariant, deviceAngle, deviceRotation, selectedDeviceId, background, screenshotOffsetX, screenshotOffsetY, screenshotCornerRadius])
 
   // Also keep the stage ref for backward compat
   useEffect(() => {
@@ -459,10 +482,6 @@ export default function CanvasStage() {
   // Background colors for Konva gradient
   const bgColors = background.colors ?? ['#e0e0e0', '#bdbdbd']
 
-  // Device position within the export area (centered with padding)
-  const deviceOffsetX = EXPORT_PADDING
-  const deviceOffsetY = EXPORT_PADDING
-
   // Screenshot drag handler — constrain so screenshot always covers the screen
   const handleScreenshotDrag = useCallback(
     (e: Konva.KonvaEventObject<DragEvent>) => {
@@ -560,24 +579,46 @@ export default function CanvasStage() {
             />
           )}
 
-          {/* Device shadow */}
-          {deviceShadow && device && (
-            <Rect
-              x={deviceOffsetX}
-              y={deviceOffsetY}
-              width={device.width}
-              height={device.height}
-              cornerRadius={device.cornerRadius + 5}
-              shadowColor="#000000"
-              shadowBlur={40}
-              shadowOffsetY={12}
-              shadowOpacity={0.25}
-              fill="transparent"
+          {/* Side wall of the body, drawn behind the face it is extruded from. */}
+          {deviceBody && (
+            <KonvaImage
+              image={deviceBody.canvas}
+              x={exportWidth / 2 + deviceBody.x}
+              y={exportHeight / 2 + deviceBody.y}
+              width={deviceBody.width}
+              height={deviceBody.height}
+              listening={false}
             />
           )}
 
-          {/* Device group */}
-          <Group x={deviceOffsetX} y={deviceOffsetY}>
+          {/* The entire device transforms as one object so the frame, screen, island and shadow stay aligned. */}
+          {device && (
+          <Group
+            x={exportWidth / 2}
+            y={exportHeight / 2}
+            offsetX={device.width / 2}
+            offsetY={device.height / 2}
+            rotation={deviceAnglePreset.rotation}
+            scaleX={deviceAnglePreset.scaleX}
+            scaleY={deviceAnglePreset.scaleY}
+            skewX={deviceAnglePreset.skewX}
+            skewY={deviceAnglePreset.skewY}
+          >
+            {deviceShadow && (
+              <Rect
+                x={0}
+                y={0}
+                width={device.width}
+                height={device.height}
+                cornerRadius={device.cornerRadius + 5}
+                shadowColor="#000000"
+                shadowBlur={40}
+                shadowOffsetY={12}
+                shadowOpacity={0.25}
+                fill="transparent"
+                listening={false}
+              />
+            )}
             {/* Screenshot clipped to screen bounds with rounded corners (BEHIND frame) */}
             {screenshotImage && device && (
               <Group
@@ -643,6 +684,7 @@ export default function CanvasStage() {
               />
             )}
           </Group>
+          )}
 
           {/* Overlay layer (text & badges) */}
           <OverlayLayer

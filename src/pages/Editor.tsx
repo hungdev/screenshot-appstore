@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Sidebar from '../components/sidebar/Sidebar'
 import CanvasStage from '../components/canvas/CanvasStage'
+import RotationStudio from '../components/canvas/RotationStudio'
 import Modal from '../components/ui/Modal'
 import Button from '../components/ui/Button'
 import { useCanvasStore } from '../store/useCanvasStore'
@@ -103,6 +104,7 @@ export default function Editor() {
       <Sidebar />
       <div className="relative flex-1 overflow-hidden bg-surface">
         <CanvasStage />
+        <RotationStudio />
         {/* Save button */}
         <button
           onClick={handleSave}

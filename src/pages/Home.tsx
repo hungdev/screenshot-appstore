@@ -9,7 +9,7 @@ import { formatDate } from '../lib/utils'
 export default function Home() {
   const navigate = useNavigate()
   const { projects, fetchProjects, removeProject, setCurrentProject } = useProjectStore()
-  const { setDevice, setDeviceVariant, setBackground, setDeviceShadow, setScreenshotCornerRadius, addOverlay } = useCanvasStore()
+  const { setDevice, setDeviceVariant, setDeviceAngle, setDeviceRotation, setBackground, setDeviceShadow, setScreenshotCornerRadius, addOverlay } = useCanvasStore()
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState<'updated' | 'name'>('updated')
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
@@ -25,6 +25,8 @@ export default function Home() {
     if (config) {
       setDevice(config.deviceId)
       setDeviceVariant(config.deviceVariant)
+      setDeviceAngle(config.deviceAngle ?? 'front')
+      setDeviceRotation(config.deviceRotation ?? { yaw: 0, pitch: 0, roll: 0 })
       setBackground(config.background)
       if (config.deviceShadow !== undefined) setDeviceShadow(config.deviceShadow)
       setScreenshotCornerRadius(config.screenshotCornerRadius ?? null)

@@ -134,11 +134,21 @@ export interface AppSettings {
 export interface CanvasConfig {
   deviceId: string
   deviceVariant: 'light' | 'dark'
+  deviceAngle?: DeviceAngle
+  deviceRotation?: DeviceRotation
   background: Background
   overlays: Overlay[]
   zoom: number
   deviceShadow?: boolean
   screenshotCornerRadius?: number | null
+}
+
+export type DeviceAngle = 'front' | 'tilt-left' | 'tilt-right' | 'flat-left' | 'flat-right' | 'custom'
+
+export interface DeviceRotation {
+  yaw: number
+  pitch: number
+  roll: number
 }
 
 // Capture library

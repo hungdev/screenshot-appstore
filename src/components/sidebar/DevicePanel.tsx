@@ -1,10 +1,12 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useCanvasStore } from '../../store/useCanvasStore'
 import { devices, deviceCategories, getDevicesByCategory, getDeviceById } from '../../lib/devices'
+import { getDeviceAnglePresets } from '../../lib/deviceAngles'
+import DeviceSlab from '../canvas/DeviceSlab'
 import type { DeviceFrame } from '../../types'
 
 export default function DevicePanel() {
-  const { selectedDeviceId, deviceVariant, screenshotCornerRadius, setDevice, setDeviceVariant, setScreenshotCornerRadius } = useCanvasStore()
+  const { selectedDeviceId, deviceVariant, deviceAngle, screenshotCornerRadius, setDevice, setDeviceVariant, setDeviceAngle, setScreenshotCornerRadius } = useCanvasStore()
   const [activeCategory, setActiveCategory] = useState<string>('phone')
 
   // Auto-select category tab to match the currently selected device
@@ -17,6 +19,15 @@ export default function DevicePanel() {
   const [search, setSearch] = useState('')
 
   const hasVariants = selectedDevice ? selectedDevice.variants.length > 1 : false
+  const anglePresets = getDeviceAnglePresets(selectedDevice)
+
+  // A device family may expose fewer usable angles (for instance laptops do
+  // not have the phone-only flat views). Keep the selection valid on switch.
+  useEffect(() => {
+    if (deviceAngle !== 'custom' && !anglePresets.some((preset) => preset.id === deviceAngle)) {
+      setDeviceAngle('front')
+    }
+  }, [selectedDeviceId, deviceAngle, setDeviceAngle])
 
   const filteredDevices = useMemo(() => {
     let list: DeviceFrame[]
@@ -169,6 +180,46 @@ export default function DevicePanel() {
             >
               Dark
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Device view — a concise visual picker inspired by the view cards in Screenshots Pro. */}
+      {selectedDevice && anglePresets.length > 1 && (
+        <div>
+          <div className="mb-2 flex items-baseline justify-between">
+            <span className="text-xs text-text-secondary">Device view</span>
+            <span className="text-[10px] text-text-tertiary">{anglePresets.length} views</span>
+          </div>
+          <div className="grid grid-cols-3 gap-1.5">
+            {anglePresets.map((preset) => {
+              const isActive = deviceAngle === preset.id
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => setDeviceAngle(preset.id)}
+                  title={preset.description}
+                  aria-pressed={isActive}
+                  className={`group rounded-lg border px-1.5 pb-1.5 pt-2 text-left transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+                    isActive
+                      ? 'border-primary bg-primary text-white shadow-sm'
+                      : 'border-border bg-white text-text-secondary hover:border-primary/30 hover:bg-surface'
+                  }`}
+                >
+                  <span className="flex h-14 items-center justify-center overflow-hidden rounded-md bg-black/[0.035]">
+                    <DeviceSlab
+                      device={selectedDevice}
+                      variant={deviceVariant}
+                      orientation={preset.orientation}
+                      maxWidth={44}
+                      maxHeight={42}
+                    />
+                  </span>
+                  <span className="mt-1 block truncate text-center text-[10px] font-medium leading-none">{preset.name}</span>
+                </button>
+              )
+            })}
           </div>
         </div>
       )}

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
-import type { Background, CanvasConfig, Overlay } from '../types'
+import type { Background, CanvasConfig, DeviceRotation, Overlay } from '../types'
 import { backgroundPresets } from '../lib/presets'
+import type { DeviceAngle } from '../lib/deviceAngles'
 
 interface CanvasState {
   // Screenshot data (base64)
@@ -16,6 +17,8 @@ interface CanvasState {
   // Device
   selectedDeviceId: string
   deviceVariant: 'light' | 'dark'
+  deviceAngle: DeviceAngle
+  deviceRotation: DeviceRotation
 
   // Background
   background: Background
@@ -43,6 +46,8 @@ interface CanvasState {
   setScreenshotOffset: (x: number, y: number) => void
   setDevice: (deviceId: string) => void
   setDeviceVariant: (variant: 'light' | 'dark') => void
+  setDeviceAngle: (angle: DeviceAngle) => void
+  setDeviceRotation: (rotation: DeviceRotation) => void
   setBackground: (background: Background) => void
   setZoom: (zoom: number) => void
   setStagePosition: (x: number, y: number) => void
@@ -56,7 +61,7 @@ interface CanvasState {
   getCanvasConfig: () => CanvasConfig
 }
 
-export const useCanvasStore = create<CanvasState>((set) => ({
+export const useCanvasStore = create<CanvasState>((set): CanvasState => ({
   screenshot: null,
   screenshotWidth: 0,
   screenshotHeight: 0,
@@ -66,6 +71,8 @@ export const useCanvasStore = create<CanvasState>((set) => ({
 
   selectedDeviceId: 'iphone-17-pro-max',
   deviceVariant: 'light',
+  deviceAngle: 'front',
+  deviceRotation: { yaw: 0, pitch: 0, roll: 0 },
 
   background: backgroundPresets[0],
 
@@ -93,6 +100,9 @@ export const useCanvasStore = create<CanvasState>((set) => ({
 
   setDeviceVariant: (variant) => set({ deviceVariant: variant, hasUnsavedChanges: true }),
 
+  setDeviceAngle: (angle) => set({ deviceAngle: angle, hasUnsavedChanges: true }),
+  setDeviceRotation: (deviceRotation) => set({ deviceRotation, hasUnsavedChanges: true }),
+
   setBackground: (background) => set({ background, hasUnsavedChanges: true }),
 
   setZoom: (zoom) => set({ zoom: Math.max(0.1, Math.min(5, zoom)) }),
@@ -118,11 +128,13 @@ export const useCanvasStore = create<CanvasState>((set) => ({
 
   markSaved: () => set({ hasUnsavedChanges: false }),
 
-  getCanvasConfig: () => {
-    const state = useCanvasStore.getState()
+  getCanvasConfig: (): CanvasConfig => {
+    const state: CanvasState = useCanvasStore.getState()
     return {
       deviceId: state.selectedDeviceId,
       deviceVariant: state.deviceVariant,
+      deviceAngle: state.deviceAngle,
+      deviceRotation: state.deviceRotation,
       background: state.background,
       overlays: state.overlays,
       zoom: state.zoom,
