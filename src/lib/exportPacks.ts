@@ -67,7 +67,10 @@ export const exportPacks: ExportPack[] = [
     name: 'iPad App Store',
     description: 'iPad screenshots for App Store',
     sizes: [
-      { label: 'iPad Pro 13"', width: 2048, height: 2732, filename: 'ipad-pro-13', deviceId: 'ipad-pro-13-space-gray-portrait' },
+      { label: 'iPad portrait (2064 × 2752)', width: 2064, height: 2752, filename: 'ipad-2064x2752' },
+      { label: 'iPad landscape (2752 × 2064)', width: 2752, height: 2064, filename: 'ipad-2752x2064' },
+      { label: 'iPad Pro 13" portrait (2048 × 2732)', width: 2048, height: 2732, filename: 'ipad-pro-13', deviceId: 'ipad-pro-13-space-gray-portrait' },
+      { label: 'iPad Pro 13" landscape (2732 × 2048)', width: 2732, height: 2048, filename: 'ipad-2732x2048' },
       { label: 'iPad Gold', width: 1536, height: 2048, filename: 'ipad-gold', deviceId: 'ipad-gold' }
     ]
   }

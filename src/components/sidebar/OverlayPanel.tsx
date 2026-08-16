@@ -120,7 +120,7 @@ export default function OverlayPanel() {
         </div>
         <button
           onClick={handleUploadBadge}
-          className="w-full rounded-lg border border-dashed border-border px-3 py-2 text-xs text-text-secondary hover:bg-surface transition-colors"
+          className="mt-2 w-full rounded-lg border border-dashed border-border px-3 py-2 text-xs text-text-secondary hover:bg-surface transition-colors"
         >
           Upload custom badge
         </button>

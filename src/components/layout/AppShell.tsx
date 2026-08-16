@@ -79,6 +79,26 @@ function ExportIcon() {
   )
 }
 
+function ImageIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="14" height="14" rx="2" />
+      <circle cx="7.25" cy="7.25" r="1.25" />
+      <path d="m4.5 15 4-4 2.5 2.5 2-2 2.5 2.5" />
+    </svg>
+  )
+}
+
+function DeviceIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="5.5" y="2.5" width="9" height="15" rx="1.75" />
+      <path d="M8.5 5h3" />
+      <path d="M9.25 14.75h1.5" />
+    </svg>
+  )
+}
+
 interface NavItemProps {
   to: string
   icon: (props: { filled?: boolean }) => JSX.Element
@@ -163,8 +183,8 @@ function AppShellContent({ children }: { children: ReactNode }) {
           </NavLink>
           <NavItem to="/library" icon={GridIcon} label="Capture library" />
           <div className="my-2 w-6 border-t border-border" role="separator" />
-          <EditorTab panel="source" label="Source"><FolderIcon /></EditorTab>
-          <EditorTab panel="device" label="Device"><PlusIcon /></EditorTab>
+          <EditorTab panel="source" label="Source"><ImageIcon /></EditorTab>
+          <EditorTab panel="device" label="Device"><DeviceIcon /></EditorTab>
           <EditorTab panel="background" label="Background"><GridIcon /></EditorTab>
           <EditorTab panel="overlay" label="Overlays"><PaintbrushIcon /></EditorTab>
           <EditorTab panel="export" label="Export"><ExportIcon /></EditorTab>
