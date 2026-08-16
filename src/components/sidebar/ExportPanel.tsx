@@ -37,8 +37,36 @@ async function saveBatchExports(exports: RenderedExport[]) {
     })))
   }
 
-  // Web fallback: browsers do not expose a folder picker compatible with the
-  // Electron batch IPC, so download each selected export.
+  // Browser fallback: use the File System Access API when available so all
+  // panels land in the same folder instead of relying on browser downloads.
+  const browserWindow = window as Window & {
+    showDirectoryPicker?: () => Promise<{
+      getFileHandle: (name: string, options: { create: boolean }) => Promise<{
+        createWritable: () => Promise<{ write: (data: Blob) => Promise<void>; close: () => Promise<void> }>
+      }>
+    }>
+  }
+  if (browserWindow.showDirectoryPicker) {
+    try {
+      const directory = await browserWindow.showDirectoryPicker()
+      for (const item of exports) {
+        const file = await directory.getFileHandle(item.filename, { create: true })
+        const writable = await file.createWritable()
+        const blob = await (await fetch(item.dataURL)).blob()
+        await writable.write(blob)
+        await writable.close()
+      }
+      return { success: true }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return { success: false, error: 'Cancelled' }
+      }
+      return { success: false, error: error instanceof Error ? error.message : 'Could not save exported panels' }
+    }
+  }
+
+  // Last-resort fallback for browsers without a directory picker. Trigger
+  // downloads sequentially; simultaneous downloads are commonly blocked.
   for (const item of exports) {
     const link = document.createElement('a')
     link.href = item.dataURL
@@ -47,6 +75,7 @@ async function saveBatchExports(exports: RenderedExport[]) {
     document.body.appendChild(link)
     link.click()
     link.remove()
+    await new Promise((resolve) => window.setTimeout(resolve, 150))
   }
   return { success: true }
 }
@@ -60,7 +89,7 @@ export default function ExportPanel() {
   const [customWidth, setCustomWidth] = useState('1242')
   const [customHeight, setCustomHeight] = useState('2688')
   const [customExporting, setCustomExporting] = useState(false)
-  const { outputWidth, outputHeight, setOutputDimensions } = useCanvasStore()
+  const { outputWidth, outputHeight, boxes, setOutputDimensions } = useCanvasStore()
 
   const [format, setFormat] = useState<'png' | 'webp'>('png')
 
@@ -74,6 +103,7 @@ export default function ExportPanel() {
   }
 
   const getCanvasExport = () => window.__canvasExport
+  const getCanvasPanelExport = () => window.__canvasExportPanels
 
   const applyCustomSizeToCanvas = () => {
     const width = Number.parseInt(customWidth, 10)
@@ -94,6 +124,26 @@ export default function ExportPanel() {
       }
 
       setExportMime(format)
+      if (boxes.length > 1) {
+        const panelExportFn = getCanvasPanelExport()
+        if (!panelExportFn) throw new Error('Panel exporter is not ready')
+        const panels = await panelExportFn(2)
+        if (panels.length !== boxes.length || panels.some((panel) => !panel.dataURL)) {
+          throw new Error('Could not render every panel')
+        }
+        const result = await saveBatchExports(panels.map((panel, index) => ({
+          dataURL: panel.dataURL,
+          filename: `frameup-panel-${String(index + 1).padStart(2, '0')}.${format}`,
+          format
+        })))
+        if (!result.success) {
+          if (result.error !== 'Cancelled') toast.error(result.error ?? 'Export failed')
+        } else {
+          toast.success(`Exported ${panels.length} panels`)
+        }
+        setExporting(false)
+        return
+      }
       const dataURL = exportFn(2)
       if (!dataURL) {
         toast.error('Export failed — canvas is empty')
@@ -112,8 +162,9 @@ export default function ExportPanel() {
       } else {
         toast.success('Exported successfully')
       }
-    } catch {
-      toast.error('Export failed')
+    } catch (error) {
+      console.error('Panel export failed', error)
+      toast.error(error instanceof Error ? `Export failed: ${error.message}` : 'Export failed')
     }
     setExporting(false)
   }
@@ -145,6 +196,22 @@ export default function ExportPanel() {
       for (let i = 0; i < sizes.length; i++) {
         const size = sizes[i]
         setBatchProgress({ current: i + 1, total: sizes.length })
+        if (boxes.length > 1) {
+          const panelExportFn = getCanvasPanelExport()
+          if (!panelExportFn) throw new Error('Panel exporter is not ready')
+          const panels = await panelExportFn(1, size.width, size.height)
+          if (panels.length !== boxes.length || panels.some((panel) => !panel.dataURL)) {
+            throw new Error('Could not render every panel')
+          }
+          panels.forEach((panel, panelIndex) => {
+            jobs.push({
+              dataURL: panel.dataURL,
+              filename: `${size.filename}-panel-${String(panelIndex + 1).padStart(2, '0')}.${format}`,
+              format
+            })
+          })
+          continue
+        }
         const result = exportFn(size.width, size.height, size.deviceId)
         const dataURL = result instanceof Promise ? await result : result
         if (!dataURL) {
@@ -163,8 +230,9 @@ export default function ExportPanel() {
       } else {
         if (result.error !== 'Cancelled') toast.error(result.error ?? 'Batch export failed')
       }
-    } catch {
-      toast.error('Batch export failed')
+    } catch (error) {
+      console.error('Batch export failed', error)
+      toast.error(error instanceof Error ? `Batch export failed: ${error.message}` : 'Batch export failed')
     }
     setBatchExporting(false)
   }
@@ -189,6 +257,22 @@ export default function ExportPanel() {
         return
       }
       setExportMime(format)
+      if (boxes.length > 1) {
+        const panelExportFn = getCanvasPanelExport()
+        if (!panelExportFn) throw new Error('Panel exporter is not ready')
+        const panels = await panelExportFn(1, width, height)
+        if (panels.length !== boxes.length || panels.some((panel) => !panel.dataURL)) {
+          throw new Error('Could not render every panel')
+        }
+        const response = await saveBatchExports(panels.map((panel, index) => ({
+          dataURL: panel.dataURL,
+          filename: `frameup-panel-${String(index + 1).padStart(2, '0')}-${width}x${height}.${format}`,
+          format
+        })))
+        if (!response.success && response.error !== 'Cancelled') toast.error(response.error ?? 'Export failed')
+        else if (response.success) toast.success(`Exported ${panels.length} panels`)
+        return
+      }
       const result = exportFn(width, height)
       const dataURL = result instanceof Promise ? await result : result
       if (!dataURL) {
@@ -205,8 +289,9 @@ export default function ExportPanel() {
       } else {
         toast.success(`Exported ${width} × ${height}`)
       }
-    } catch {
-      toast.error('Export failed')
+    } catch (error) {
+      console.error('Custom export failed', error)
+      toast.error(error instanceof Error ? `Export failed: ${error.message}` : 'Export failed')
     } finally {
       setCustomExporting(false)
     }
@@ -252,7 +337,7 @@ export default function ExportPanel() {
 
       {/* Single export button */}
       <Button onClick={handleExport} loading={exporting} className="w-full">
-        Export Single {format.toUpperCase()}
+        {boxes.length > 1 ? `Export ${boxes.length} panels` : `Export Single ${format.toUpperCase()}`}
       </Button>
 
       {/* Batch export */}

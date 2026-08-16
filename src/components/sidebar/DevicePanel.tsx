@@ -3,10 +3,11 @@ import { useCanvasStore } from '../../store/useCanvasStore'
 import { devices, deviceCategories, getDevicesByCategory, getDeviceById } from '../../lib/devices'
 import { getDeviceAnglePresets } from '../../lib/deviceAngles'
 import DeviceSlab from '../canvas/DeviceSlab'
+import RotationStudio from '../canvas/RotationStudio'
 import type { DeviceFrame } from '../../types'
 
 export default function DevicePanel() {
-  const { selectedDeviceId, deviceVariant, deviceAngle, screenshotCornerRadius, setDevice, setDeviceVariant, setDeviceAngle, setScreenshotCornerRadius } = useCanvasStore()
+  const { selectedDeviceId, deviceVariant, deviceAngle, screenshotCornerRadius, rotationStudioPlacement, setDevice, setDeviceVariant, setDeviceAngle, setScreenshotCornerRadius, setRotationStudioPlacement } = useCanvasStore()
   const [activeCategory, setActiveCategory] = useState<string>('phone')
 
   // Auto-select category tab to match the currently selected device
@@ -221,6 +222,36 @@ export default function DevicePanel() {
               )
             })}
           </div>
+          <button
+            type="button"
+            onClick={() => setDeviceAngle(deviceAngle === 'custom' ? 'front' : 'custom')}
+            className={`mt-1.5 flex w-full items-center justify-between rounded-lg border px-2.5 py-2 text-left text-[10px] font-medium transition-colors ${
+              deviceAngle === 'custom'
+                ? 'border-primary bg-primary text-white'
+                : 'border-border bg-white text-text-secondary hover:border-primary/30 hover:bg-surface'
+            }`}
+          >
+            <span>Custom 3D view</span>
+            <span className={`rounded-full px-1.5 py-0.5 text-[9px] ${deviceAngle === 'custom' ? 'bg-white/20 text-white' : 'bg-surface text-text-tertiary'}`}>3D</span>
+          </button>
+          {deviceAngle === 'custom' && (
+            <>
+              <div className="mt-2 flex items-center justify-between rounded-md bg-surface px-2 py-1.5">
+                <span className="text-[10px] text-text-secondary">Studio placement</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={rotationStudioPlacement === 'canvas'}
+                  onClick={() => setRotationStudioPlacement(rotationStudioPlacement === 'canvas' ? 'panel' : 'canvas')}
+                  className={`relative h-5 w-9 rounded-full transition-colors ${rotationStudioPlacement === 'canvas' ? 'bg-primary' : 'bg-border'}`}
+                  title={rotationStudioPlacement === 'canvas' ? 'Show in Device view' : 'Float on canvas'}
+                >
+                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${rotationStudioPlacement === 'canvas' ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+                </button>
+              </div>
+              {rotationStudioPlacement === 'panel' && <div className="mt-2"><RotationStudio /></div>}
+            </>
+          )}
         </div>
       )}
 

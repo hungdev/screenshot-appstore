@@ -1,5 +1,5 @@
 import { useRef, useEffect, useCallback, useMemo, useState } from 'react'
-import { Stage, Layer, Rect, Image as KonvaImage, Group, Transformer } from 'react-konva'
+import { Stage, Layer, Rect, Image as KonvaImage, Group, Line, Transformer } from 'react-konva'
 import Konva from 'konva'
 import { useCanvasStore } from '../../store/useCanvasStore'
 import { getDeviceById } from '../../lib/devices'
@@ -7,6 +7,7 @@ import { getAngledDeviceBounds, getCustomDeviceAngle, getDeviceAnglePreset } fro
 import { renderDeviceBody, roundedRectPath } from '../../lib/deviceBody'
 import { useImageLoader } from './useImageLoader'
 import OverlayLayer from './OverlayLayer'
+import type { DeviceAngle, DeviceFrame, DeviceRotation, MockupBox } from '../../types'
 
 // Used only by the legacy per-device batch override renderer.
 const EXPORT_PADDING = 80
@@ -22,16 +23,80 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   })
 }
 
+interface DeviceBoxNodeProps {
+  box: MockupBox
+  device: DeviceFrame
+  deviceVariant: 'light' | 'dark'
+  deviceAngle: DeviceAngle
+  deviceRotation: DeviceRotation
+  deviceShadow: boolean
+  screenshotCornerRadius: number | null
+  selected: boolean
+  onSelect: () => void
+  onRef: (node: Konva.Group | null) => void
+  onDragMove: (node: Konva.Group) => void
+  onTransformEnd: (node: Konva.Group) => void
+}
+
+function DeviceBoxNode({ box, device, deviceVariant, deviceAngle, deviceRotation, deviceShadow, screenshotCornerRadius, selected, onSelect, onRef, onDragMove, onTransformEnd }: DeviceBoxNodeProps) {
+  const screenshotImage = useImageLoader(box.screenshot ? `data:${box.screenshotMime};base64,${box.screenshot}` : null)
+  const frameImage = useImageLoader(device.assetPath[deviceVariant])
+  const anglePreset = useMemo(
+    () => (deviceAngle === 'custom' ? getCustomDeviceAngle(device, deviceRotation) : getDeviceAnglePreset(device, deviceAngle)),
+    [device, deviceAngle, deviceRotation]
+  )
+  const deviceBody = useMemo(
+    () => renderDeviceBody(device, frameImage, anglePreset),
+    [device, frameImage, anglePreset]
+  )
+  const screenshotWidth = device.screenBounds.width
+  const screenshotHeight = screenshotImage?.naturalHeight
+    ? (device.screenBounds.width / screenshotImage.naturalWidth) * screenshotImage.naturalHeight
+    : device.screenBounds.height
+
+  return (
+    <Group
+      ref={onRef}
+      x={box.deviceX ?? box.x + box.width / 2}
+      y={box.deviceY ?? box.y + box.height / 2}
+      scaleX={box.scale}
+      scaleY={box.scale}
+      draggable
+      onClick={onSelect}
+      onTap={onSelect}
+      onDragMove={(event) => onDragMove(event.target as Konva.Group)}
+      onDragEnd={(event) => onTransformEnd(event.target as Konva.Group)}
+      onTransformEnd={(event) => onTransformEnd(event.target as Konva.Group)}
+      name={selected ? 'active-device-box' : 'device-box'}
+    >
+      {deviceBody && <KonvaImage image={deviceBody.canvas} x={deviceBody.x} y={deviceBody.y} width={deviceBody.width} height={deviceBody.height} listening={false} />}
+      <Group x={0} y={0} offsetX={device.width / 2} offsetY={device.height / 2} rotation={anglePreset.rotation} scaleX={anglePreset.scaleX} scaleY={anglePreset.scaleY} skewX={anglePreset.skewX} skewY={anglePreset.skewY}>
+        <Rect x={0} y={0} width={device.width} height={device.height} fill="rgba(0, 0, 0, 0.001)" />
+        {deviceShadow && <Rect x={0} y={0} width={device.width} height={device.height} cornerRadius={device.cornerRadius + 5} shadowColor="#000000" shadowBlur={40} shadowOffsetY={12} shadowOpacity={0.25} fill="transparent" listening={false} />}
+        {screenshotImage && (
+          <Group clipFunc={(ctx) => roundedRectPath(ctx as unknown as CanvasRenderingContext2D, device.screenBounds.x, device.screenBounds.y, device.screenBounds.width, device.screenBounds.height, screenshotCornerRadius ?? device.cornerRadius)}>
+            <KonvaImage image={screenshotImage} x={device.screenBounds.x} y={device.screenBounds.y} width={screenshotWidth} height={screenshotHeight} listening={false} />
+          </Group>
+        )}
+        {frameImage && <KonvaImage image={frameImage} x={0} y={0} width={device.width} height={device.height} listening={false} />}
+        {device.dynamicIslandBounds && !device.noCutoutOf && <Rect x={device.dynamicIslandBounds.x} y={device.dynamicIslandBounds.y} width={device.dynamicIslandBounds.width} height={device.dynamicIslandBounds.height} cornerRadius={device.dynamicIslandBounds.cornerRadius} fill="#000000" listening={false} />}
+        {!screenshotImage && <Rect x={device.screenBounds.x} y={device.screenBounds.y} width={device.screenBounds.width} height={device.screenBounds.height} fill="#F3F4F6" cornerRadius={screenshotCornerRadius ?? device.cornerRadius} />}
+      </Group>
+    </Group>
+  )
+}
+
 export default function CanvasStage() {
   const stageRef = useRef<Konva.Stage>(null)
   const exportLayerRef = useRef<Konva.Layer>(null)
-  const deviceGroupRef = useRef<Konva.Group>(null)
+  const deviceGroupRefs = useRef<Record<string, Konva.Group | null>>({})
   const deviceTransformerRef = useRef<Konva.Transformer>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const hasFittedArtboardRef = useRef(false)
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null)
   const [isDeviceSelected, setIsDeviceSelected] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
+  const [alignmentGuides, setAlignmentGuides] = useState<{ panelId: string; vertical: boolean; horizontal: boolean } | null>(null)
   const panStartRef = useRef<{ x: number; y: number; stageX: number; stageY: number } | null>(null)
   const {
     screenshot,
@@ -42,14 +107,15 @@ export default function CanvasStage() {
     deviceVariant,
     deviceAngle,
     deviceRotation,
-    deviceX,
-    deviceY,
-    deviceScale,
     outputWidth,
     outputHeight,
     background,
     deviceShadow,
     screenshotCornerRadius,
+    boxes,
+    devices,
+    activeDeviceId,
+    activeBoxId,
     zoom,
     canvasWidth,
     canvasHeight,
@@ -58,7 +124,9 @@ export default function CanvasStage() {
     setZoom,
     setStagePosition,
     setCanvasDimensions,
-    setDeviceTransform
+    setBoxTransform,
+    setActiveDevice,
+    setActiveBox
   } = useCanvasStore()
 
   const device = getDeviceById(selectedDeviceId)
@@ -90,11 +158,11 @@ export default function CanvasStage() {
 
   useEffect(() => {
     const transformer = deviceTransformerRef.current
-    const group = deviceGroupRef.current
+    const group = activeDeviceId ? deviceGroupRefs.current[activeDeviceId] : null
     if (!transformer || !group) return
     transformer.nodes(isDeviceSelected ? [group] : [])
     transformer.getLayer()?.batchDraw()
-  }, [isDeviceSelected, device, deviceX, deviceY, deviceScale])
+  }, [isDeviceSelected, activeDeviceId, device, devices])
 
   // Switching a preset or applying a custom size changes the real artboard,
   // so fit it back into view for immediate composition feedback.
@@ -394,7 +462,39 @@ export default function CanvasStage() {
     }
 
     window.__canvasExport = exportFn
-  }, [exportWidth, exportHeight, screenshot, deviceVariant, deviceAngle, deviceRotation, selectedDeviceId, background, screenshotOffsetX, screenshotOffsetY, screenshotCornerRadius])
+    window.__canvasExportPanels = async (pixelRatio = 1, targetWidth, targetHeight) => {
+      const composition = exportFn(1)
+      const dataURL = composition instanceof Promise ? await composition : composition
+      if (!dataURL) throw new Error('Could not render the composition')
+
+      const sourceImage = await loadImage(dataURL)
+      const mime = window.__canvasExportMime || 'image/png'
+      return boxes.map((box) => {
+        const sourceWidth = box.width || exportWidth
+        const sourceHeight = box.height || exportHeight
+        const panelWidth = targetWidth ?? sourceWidth
+        const panelHeight = targetHeight ?? sourceHeight
+        const outputCanvas = document.createElement('canvas')
+        outputCanvas.width = Math.max(1, Math.round(panelWidth * pixelRatio))
+        outputCanvas.height = Math.max(1, Math.round(panelHeight * pixelRatio))
+        const context = outputCanvas.getContext('2d')
+        if (!context) throw new Error('Could not create an export canvas')
+        context.drawImage(
+          sourceImage,
+          box.x || 0,
+          box.y || 0,
+          sourceWidth,
+          sourceHeight,
+          0,
+          0,
+          outputCanvas.width,
+          outputCanvas.height
+        )
+        const dataURL = outputCanvas.toDataURL(mime)
+        return { id: box.id, dataURL }
+      })
+    }
+  }, [exportWidth, exportHeight, screenshot, deviceVariant, deviceAngle, deviceRotation, selectedDeviceId, background, screenshotOffsetX, screenshotOffsetY, screenshotCornerRadius, boxes, devices])
 
   // Also keep the stage ref for backward compat
   useEffect(() => {
@@ -484,7 +584,7 @@ export default function CanvasStage() {
           }
           return false
         }
-        const clickedDevice = isInside(deviceGroupRef.current)
+        const clickedDevice = Object.values(deviceGroupRefs.current).some((group) => isInside(group))
         const clickedDeviceControl = isInside(deviceTransformerRef.current)
         const clickedOverlay = (() => {
           let current: Konva.Node | null = e.target
@@ -562,22 +662,59 @@ export default function CanvasStage() {
   const offsetX = (canvasWidth - exportWidth * zoom) / 2 + stageX
   const offsetY = (canvasHeight - exportHeight * zoom) / 2 + stageY
 
+  // Positions are stored in export-space, so snapping stays stable at every
+  // viewport zoom. Guides are editor-only and never enter the export layer.
+  const handleDeviceDragMove = useCallback((deviceItem: typeof devices[number], node: Konva.Group) => {
+    const panel = boxes.find((box) => box.id === deviceItem.panelId)
+    if (!panel) return
+
+    const snapDistance = 18
+    const panelCenterX = panel.x + panel.width / 2
+    const panelCenterY = panel.y + panel.height / 2
+    const vertical = Math.abs(node.x() - panelCenterX) <= snapDistance
+    const horizontal = Math.abs(node.y() - panelCenterY) <= snapDistance
+
+    if (vertical || horizontal) {
+      node.position({
+        x: vertical ? panelCenterX : node.x(),
+        y: horizontal ? panelCenterY : node.y()
+      })
+    }
+    setAlignmentGuides(vertical || horizontal ? { panelId: panel.id, vertical, horizontal } : null)
+  }, [boxes])
+
+  const clearAlignmentGuides = useCallback(() => setAlignmentGuides(null), [])
+
+  const handleOverlayDragMove = useCallback((node: Konva.Node) => {
+    const panel = boxes.find((box) => box.id === activeBoxId)
+    if (!panel) return
+
+    // Text and badges use a top-left origin, so align their visual center.
+    const nodeX = node.x()
+    const nodeY = node.y()
+    const nodeWidth = node.width() * node.scaleX()
+    const nodeHeight = node.height() * node.scaleY()
+    const panelCenterX = panel.x + panel.width / 2
+    const panelCenterY = panel.y + panel.height / 2
+    const snapDistance = 18
+    const vertical = Math.abs(nodeX + nodeWidth / 2 - panelCenterX) <= snapDistance
+    const horizontal = Math.abs(nodeY + nodeHeight / 2 - panelCenterY) <= snapDistance
+
+    if (vertical || horizontal) {
+      node.position({
+        x: vertical ? panelCenterX - nodeWidth / 2 : nodeX,
+        y: horizontal ? panelCenterY - nodeHeight / 2 : nodeY
+      })
+    }
+    setAlignmentGuides(vertical || horizontal ? { panelId: panel.id, vertical, horizontal } : null)
+  }, [activeBoxId, boxes])
+
   // Background image (for image type)
   const bgImageSrc = background.type === 'image' ? background.value : null
   const bgImage = useImageLoader(bgImageSrc)
 
   // Background colors for Konva gradient
   const bgColors = background.colors ?? ['#e0e0e0', '#bdbdbd']
-
-  const handleDeviceTransformEnd = useCallback(() => {
-    const node = deviceGroupRef.current
-    if (!node) return
-    // Corner handles preserve proportions, but use scaleX defensively so a
-    // programmatic transform cannot ever stretch the device frame.
-    const scale = Math.max(0.1, Math.min(4, node.scaleX()))
-    node.scale({ x: scale, y: scale })
-    setDeviceTransform(node.x(), node.y(), scale)
-  }, [setDeviceTransform])
 
   const isMac = navigator.platform?.includes('Mac') ?? true
   const modKey = isMac ? '\u2318' : 'Ctrl'
@@ -601,7 +738,7 @@ export default function CanvasStage() {
         onMouseDown={handleStageMouseDown}
         onMouseMove={handleStageMouseMove}
         onMouseUp={handleStageMouseUp}
-        onMouseLeave={handleStageMouseUp}
+        onMouseLeave={() => { handleStageMouseUp(); clearAlignmentGuides() }}
       >
         {/* Workspace background (not exported) */}
         <Layer>
@@ -635,169 +772,110 @@ export default function CanvasStage() {
           clipHeight={exportHeight}
         >
           {/* Mockup background */}
-          {background.type === 'transparent' ? null : background.type === 'image' && bgImage ? (
-            <KonvaImage
-              x={0}
-              y={0}
-              width={exportWidth}
-              height={exportHeight}
-              image={bgImage}
-              cornerRadius={16}
-            />
-          ) : background.type === 'solid' ? (
-            <Rect
-              x={0}
-              y={0}
-              width={exportWidth}
-              height={exportHeight}
-              cornerRadius={16}
-              fill={background.value}
-            />
-          ) : (
-            <Rect
-              x={0}
-              y={0}
-              width={exportWidth}
-              height={exportHeight}
-              cornerRadius={16}
-              fillLinearGradientStartPoint={{ x: 0, y: 0 }}
-              fillLinearGradientEndPoint={{ x: exportWidth, y: exportHeight }}
-              fillLinearGradientColorStops={[0, bgColors[0], 1, bgColors[1]]}
-            />
-          )}
+          {/* Composition background. Individual panel backgrounds are rendered below,
+              leaving this neutral surface visible in the gaps between panels. */}
+          <Rect
+            x={0}
+            y={0}
+            width={exportWidth}
+            height={exportHeight}
+            fill="#E5E7EB"
+          />
 
-          {/* Side wall of the body, drawn behind the face it is extruded from. */}
-          {/* The device is an independent object on the fixed artboard. The layer clip
-              is intentional: moving it past an edge crops it, never resizes the artboard. */}
-          {device && (
-          <Group
-            ref={deviceGroupRef}
-            x={deviceX}
-            y={deviceY}
-            scaleX={deviceScale}
-            scaleY={deviceScale}
-            draggable
-            onClick={() => { setIsDeviceSelected(true); setSelectedOverlayId(null) }}
-            onTap={() => { setIsDeviceSelected(true); setSelectedOverlayId(null) }}
-            onDragEnd={handleDeviceTransformEnd}
-            onTransformEnd={handleDeviceTransformEnd}
-          >
-            {deviceBody && (
-              <KonvaImage
-                image={deviceBody.canvas}
-                x={deviceBody.x}
-                y={deviceBody.y}
-                width={deviceBody.width}
-                height={deviceBody.height}
-                listening={false}
-              />
-            )}
-            <Group
-              x={0}
-              y={0}
-              offsetX={device.width / 2}
-              offsetY={device.height / 2}
-              rotation={deviceAnglePreset.rotation}
-              scaleX={deviceAnglePreset.scaleX}
-              scaleY={deviceAnglePreset.scaleY}
-              skewX={deviceAnglePreset.skewX}
-              skewY={deviceAnglePreset.skewY}
-            >
-            {/* A transparent hit surface makes the complete device draggable.
-                The visual frame and screenshot are non-listening so neither
-                can steal this interaction from the outer draggable group. */}
+          {/* Each panel is a complete artboard: background first, then its device. */}
+          {boxes.map((box) => (
+            background.type === 'image' && bgImage ? (
+              <KonvaImage key={`panel-${box.id}`} x={box.x} y={box.y} width={box.width} height={box.height} image={bgImage} cornerRadius={16} listening={false} />
+            ) : background.type === 'solid' ? (
+              <Rect key={`panel-${box.id}`} x={box.x} y={box.y} width={box.width} height={box.height} cornerRadius={16} fill={background.value} listening={false} />
+            ) : background.type === 'transparent' ? (
+              <Rect key={`panel-${box.id}`} x={box.x} y={box.y} width={box.width} height={box.height} cornerRadius={16} stroke="#CBD5E1" strokeWidth={1} listening={false} />
+            ) : (
+              <Rect key={`panel-${box.id}`} x={box.x} y={box.y} width={box.width} height={box.height} cornerRadius={16} fillLinearGradientStartPoint={{ x: box.x, y: box.y }} fillLinearGradientEndPoint={{ x: box.x + box.width, y: box.y + box.height }} fillLinearGradientColorStops={[0, bgColors[0], 1, bgColors[1]]} listening={false} />
+            )
+          ))}
+          {boxes.map((box) => box.id === activeBoxId && (
             <Rect
-              x={0}
-              y={0}
-              width={device.width}
-              height={device.height}
-              fill="rgba(0, 0, 0, 0.001)"
+              key={`active-panel-${box.id}`}
+              x={box.x}
+              y={box.y}
+              width={box.width}
+              height={box.height}
+              cornerRadius={16}
+              stroke="#2563EB"
+              strokeWidth={3}
+              dash={[10, 8]}
+              listening={false}
             />
-            {deviceShadow && (
-              <Rect
-                x={0}
-                y={0}
-                width={device.width}
-                height={device.height}
-                cornerRadius={device.cornerRadius + 5}
-                shadowColor="#000000"
-                shadowBlur={40}
-                shadowOffsetY={12}
-                shadowOpacity={0.25}
-                fill="transparent"
-                listening={false}
-              />
-            )}
-            {/* Screenshot clipped to screen bounds with rounded corners (BEHIND frame) */}
-            {screenshotImage && device && (
-              <Group
-                clipFunc={(ctx) => {
-                  const cr = screenshotCornerRadius ?? device.cornerRadius
-                  roundedRectPath(
-                    ctx as unknown as CanvasRenderingContext2D,
-                    device.screenBounds.x,
-                    device.screenBounds.y,
-                    device.screenBounds.width,
-                    device.screenBounds.height,
-                    cr
-                  )
+          ))}
+
+          {/* Each device belongs to one complete panel and can still be moved/resized. */}
+          {devices.map((deviceItem) => {
+            const panel = boxes.find((box) => box.id === deviceItem.panelId)
+            if (!panel) return null
+            const boxDevice = getDeviceById(deviceItem.deviceId)
+            if (!boxDevice) return null
+            const deviceBox = {
+              ...panel,
+              id: deviceItem.id,
+              deviceX: deviceItem.x,
+              deviceY: deviceItem.y,
+              scale: deviceItem.scale,
+              screenshot: deviceItem.screenshot,
+              screenshotWidth: deviceItem.screenshotWidth,
+              screenshotHeight: deviceItem.screenshotHeight,
+              screenshotMime: deviceItem.screenshotMime
+            }
+            return (
+              <DeviceBoxNode
+                key={deviceItem.id}
+                box={deviceBox}
+                device={boxDevice}
+                deviceVariant={deviceVariant}
+                deviceAngle={deviceItem.deviceAngle}
+                deviceRotation={deviceItem.deviceRotation}
+                deviceShadow={deviceShadow}
+                screenshotCornerRadius={screenshotCornerRadius}
+                selected={deviceItem.id === activeDeviceId && isDeviceSelected}
+                onSelect={() => { setActiveDevice(deviceItem.id); setIsDeviceSelected(true); setSelectedOverlayId(null) }}
+                onRef={(node) => { deviceGroupRefs.current[deviceItem.id] = node }}
+                onDragMove={(node) => handleDeviceDragMove(deviceItem, node)}
+                onTransformEnd={(node) => {
+                  const scale = Math.max(0.1, Math.min(4, node.scaleX()))
+                  node.scale({ x: scale, y: scale })
+                  setBoxTransform(deviceItem.id, node.x(), node.y(), scale)
+                  clearAlignmentGuides()
                 }}
-              >
-                <KonvaImage
-                  image={screenshotImage}
-                  x={device.screenBounds.x + screenshotOffsetX}
-                  y={device.screenBounds.y + screenshotOffsetY}
-                  width={ssWidth}
-                  height={ssHeight}
-                  listening={false}
-                />
-              </Group>
-            )}
+              />
+            )
+          })}
 
-            {/* Device frame (ON TOP of screenshot — frame has transparent screen hole) */}
-            {frameImage && device && (
-              <KonvaImage
-                image={frameImage}
-                x={0}
+          {/* Hide only the gaps, while allowing a device to continue into the
+              neighboring panel. */}
+          {boxes.map((box, index) => {
+            const next = boxes[index + 1]
+            if (!next) return null
+            const gapX = box.x + box.width
+            const gapWidth = Math.max(0, next.x - gapX)
+            return gapWidth > 0 ? (
+              <Rect
+                key={`gap-mask-${box.id}`}
+                x={gapX}
                 y={0}
-                width={device.width}
-                height={device.height}
+                width={gapWidth}
+                height={exportHeight}
+                fill="#E5E7EB"
                 listening={false}
               />
-            )}
-
-            {/* Dynamic Island — rendered as a Konva shape to guarantee visibility */}
-            {device?.dynamicIslandBounds && !device?.noCutoutOf && (
-              <Rect
-                x={device.dynamicIslandBounds.x}
-                y={device.dynamicIslandBounds.y}
-                width={device.dynamicIslandBounds.width}
-                height={device.dynamicIslandBounds.height}
-                cornerRadius={device.dynamicIslandBounds.cornerRadius}
-                fill="#000000"
-                listening={false}
-              />
-            )}
-
-            {/* Empty state placeholder */}
-            {!screenshotImage && device && (
-              <Rect
-                x={device.screenBounds.x}
-                y={device.screenBounds.y}
-                width={device.screenBounds.width}
-                height={device.screenBounds.height}
-                fill="#F3F4F6"
-                cornerRadius={screenshotCornerRadius ?? device.cornerRadius}
-              />
-            )}
-            </Group>
-          </Group>
-          )}
+            ) : null
+          })}
 
           {/* Overlay layer (text & badges) */}
           <OverlayLayer
             selectedOverlayId={selectedOverlayId}
             onSelectOverlay={setSelectedOverlayId}
+            onDragMove={handleOverlayDragMove}
+            onDragEnd={clearAlignmentGuides}
           />
           {device && (
             <Transformer
@@ -817,6 +895,31 @@ export default function CanvasStage() {
               visible={isDeviceSelected}
             />
           )}
+        </Layer>
+
+        {/* Smart guides live above the artboard but outside the export layer. */}
+        <Layer x={offsetX} y={offsetY} scaleX={zoom} scaleY={zoom} listening={false}>
+          {alignmentGuides && (() => {
+            const panel = boxes.find((box) => box.id === alignmentGuides.panelId)
+            if (!panel) return null
+            const guideProps = {
+              stroke: '#2563EB',
+              strokeWidth: 1.5 / zoom,
+              dash: [8 / zoom, 6 / zoom],
+              opacity: 0.9,
+              listening: false
+            }
+            return (
+              <>
+                {alignmentGuides.vertical && (
+                  <Line points={[panel.x + panel.width / 2, panel.y, panel.x + panel.width / 2, panel.y + panel.height]} {...guideProps} />
+                )}
+                {alignmentGuides.horizontal && (
+                  <Line points={[panel.x, panel.y + panel.height / 2, panel.x + panel.width, panel.y + panel.height / 2]} {...guideProps} />
+                )}
+              </>
+            )
+          })()}
         </Layer>
       </Stage>
     </div>

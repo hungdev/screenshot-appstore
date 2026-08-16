@@ -17,7 +17,7 @@ export default function Editor() {
 
   const { user } = useAppStore()
   const { currentProject, projects, saveProject, updateProject, setCurrentProject } = useProjectStore()
-  const { getCanvasConfig, markSaved, hasUnsavedChanges } = useCanvasStore()
+  const { getCanvasConfig, markSaved, hasUnsavedChanges, rotationStudioPlacement } = useCanvasStore()
 
   const handleSave = useCallback(async () => {
     if (!user) {
@@ -104,7 +104,7 @@ export default function Editor() {
       <Sidebar />
       <div className="relative flex-1 overflow-hidden bg-surface">
         <CanvasStage />
-        <RotationStudio />
+        {rotationStudioPlacement === 'canvas' && <RotationStudio floating />}
         {/* Save button */}
         <button
           onClick={handleSave}

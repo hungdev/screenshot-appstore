@@ -16,29 +16,55 @@ export default function Settings() {
   const [dataDir, setDataDir] = useState('')
   const [pickingDir, setPickingDir] = useState(false)
   const [pendingRestart, setPendingRestart] = useState(false)
+  // The settings page can also be opened from a browser/dev preview where the
+  // Electron preload bridge is not available.
+  const frameup = window.frameup as typeof window.frameup | undefined
+  const hasAppSettings = Boolean(frameup?.appSettings)
 
   useEffect(() => {
-    window.frameup.appSettings.get().then((result) => {
-      if (result.success && result.data) setDataDir(result.data.dataDirectory)
-    })
-  }, [])
+    if (!frameup?.appSettings) {
+      setDataDir('Available in the desktop app')
+      return
+    }
+
+    frameup.appSettings.get()
+      .then((result) => {
+        if (result.success && result.data) setDataDir(result.data.dataDirectory)
+      })
+      .catch(() => setDataDir('Unable to load data directory'))
+  }, [frameup])
 
   const handlePickDir = async () => {
+    if (!frameup?.appSettings) {
+      toast.info('Choosing a data folder is available in the desktop app.')
+      return
+    }
+
     setPickingDir(true)
-    const result = await window.frameup.appSettings.pickDirectory()
-    setPickingDir(false)
-    if (result.success && result.data?.path) {
-      await window.frameup.appSettings.set({ dataDirectory: result.data.path })
-      setDataDir(result.data.path)
-      setPendingRestart(true)
-      toast.info('Data directory updated. Restart the app to apply changes.')
+    try {
+      const result = await frameup.appSettings.pickDirectory()
+      if (result.success && result.data?.path) {
+        await frameup.appSettings.set({ dataDirectory: result.data.path })
+        setDataDir(result.data.path)
+        setPendingRestart(true)
+        toast.info('Data directory updated. Restart the app to apply changes.')
+      }
+    } catch {
+      toast.info('Unable to choose a data folder.')
+    } finally {
+      setPickingDir(false)
     }
   }
 
   const handleCheckUpdate = async () => {
     setCheckingUpdate(true)
     try {
-      const result = await window.frameup.updater.checkForUpdates()
+      if (!frameup?.updater) {
+        toast.info('Auto-updater is available in the desktop app.')
+        return
+      }
+
+      const result = await frameup.updater.checkForUpdates()
       if (result.success) {
         toast.info('Checking for updates...')
       } else {
@@ -47,7 +73,9 @@ export default function Settings() {
     } catch {
       toast.info('Auto-updater not available in development')
     }
-    setCheckingUpdate(false)
+    finally {
+      setCheckingUpdate(false)
+    }
   }
 
   return (
@@ -125,9 +153,13 @@ export default function Settings() {
               size="sm"
               loading={pickingDir}
               onClick={handlePickDir}
+              disabled={!hasAppSettings}
             >
               Choose folder
             </Button>
+            {!hasAppSettings && (
+              <p className="text-xs text-text-tertiary">This control requires the Electron desktop app.</p>
+            )}
             {pendingRestart && (
               <p className="text-xs text-amber-600">Restart the app to apply the new data directory.</p>
             )}
@@ -145,7 +177,11 @@ export default function Settings() {
               <span className="text-xs text-text-tertiary">v0.9 Beta</span>
             </div>
             <button
-              onClick={() => window.frameup.shell.openExternal('https://github.com/amirmun99/FrameUp-Free')}
+              onClick={() => {
+                const url = 'https://github.com/amirmun99/FrameUp-Free'
+                if (frameup?.shell) void frameup.shell.openExternal(url)
+                else window.open(url, '_blank', 'noopener,noreferrer')
+              }}
               className="mb-3 text-xs text-text-secondary hover:text-primary underline transition-colors"
             >
               View on GitHub

@@ -1,4 +1,4 @@
-import { ipcMain, dialog } from 'electron'
+import { app, ipcMain, dialog, BrowserWindow } from 'electron'
 import { writeFile } from 'fs/promises'
 import { basename, join } from 'path'
 
@@ -45,11 +45,14 @@ export function registerExportHandlers(): void {
     }
   })
 
-  ipcMain.handle('export:batch', async (_, jobs: ExportOptions[]) => {
+  ipcMain.handle('export:batch', async (event, jobs: ExportOptions[]) => {
     try {
-      const { filePaths } = await dialog.showOpenDialog({
+      const parentWindow = BrowserWindow.fromWebContents(event.sender) ?? undefined
+      const { filePaths } = await dialog.showOpenDialog(parentWindow, {
         properties: ['openDirectory', 'createDirectory'],
-        title: 'Select export folder'
+        title: 'Choose folder for exported panels',
+        defaultPath: app.getPath('downloads'),
+        buttonLabel: 'Export here'
       })
 
       if (!filePaths || filePaths.length === 0) {
@@ -57,15 +60,17 @@ export function registerExportHandlers(): void {
       }
 
       const dir = filePaths[0]
+      const savedPaths: string[] = []
       for (const job of jobs) {
         // Strip directory components to prevent path traversal
         const safeName = basename(job.filename)
         const fullPath = join(dir, safeName)
         const buffer = Buffer.from(job.base64, 'base64')
         await writeFile(fullPath, buffer)
+        savedPaths.push(fullPath)
       }
 
-      return { success: true }
+      return { success: true, data: { directory: dir, files: savedPaths } }
     } catch (err) {
       return { success: false, error: (err as Error).message }
     }

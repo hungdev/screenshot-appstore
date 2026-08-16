@@ -9,9 +9,11 @@ interface OverlayNodeProps {
   overlay: Overlay
   isSelected: boolean
   onSelect: () => void
+  onDragMove: (node: Konva.Node) => void
+  onDragEnd: () => void
 }
 
-function TextOverlayNode({ overlay, isSelected, onSelect }: OverlayNodeProps) {
+function TextOverlayNode({ overlay, isSelected, onSelect, onDragMove, onDragEnd }: OverlayNodeProps) {
   const shapeRef = useRef<Konva.Text>(null)
   const trRef = useRef<Konva.Transformer>(null)
   const { updateOverlay } = useCanvasStore()
@@ -64,7 +66,9 @@ function TextOverlayNode({ overlay, isSelected, onSelect }: OverlayNodeProps) {
           if (e.evt.button === 0) onSelect()
         }}
         onTap={onSelect}
+        onDragMove={(e) => onDragMove(e.target)}
         onDragEnd={handleDragEnd}
+        onMouseUp={onDragEnd}
         onTransformEnd={handleTransformEnd}
       />
       {isSelected && (
@@ -82,7 +86,7 @@ function TextOverlayNode({ overlay, isSelected, onSelect }: OverlayNodeProps) {
   )
 }
 
-function BadgeOverlayNode({ overlay, isSelected, onSelect }: OverlayNodeProps) {
+function BadgeOverlayNode({ overlay, isSelected, onSelect, onDragMove, onDragEnd }: OverlayNodeProps) {
   const shapeRef = useRef<Konva.Image>(null)
   const trRef = useRef<Konva.Transformer>(null)
   const { updateOverlay } = useCanvasStore()
@@ -133,7 +137,9 @@ function BadgeOverlayNode({ overlay, isSelected, onSelect }: OverlayNodeProps) {
           if (e.evt.button === 0) onSelect()
         }}
         onTap={onSelect}
+        onDragMove={(e) => onDragMove(e.target)}
         onDragEnd={handleDragEnd}
+        onMouseUp={onDragEnd}
         onTransformEnd={handleTransformEnd}
       />
       {isSelected && (
@@ -155,9 +161,11 @@ function BadgeOverlayNode({ overlay, isSelected, onSelect }: OverlayNodeProps) {
 interface OverlayLayerProps {
   selectedOverlayId: string | null
   onSelectOverlay: (id: string | null) => void
+  onDragMove: (node: Konva.Node) => void
+  onDragEnd: () => void
 }
 
-export default function OverlayLayer({ selectedOverlayId, onSelectOverlay }: OverlayLayerProps) {
+export default function OverlayLayer({ selectedOverlayId, onSelectOverlay, onDragMove, onDragEnd }: OverlayLayerProps) {
   const { overlays } = useCanvasStore()
 
   return (
@@ -173,6 +181,8 @@ export default function OverlayLayer({ selectedOverlayId, onSelectOverlay }: Ove
               overlay={overlay}
               isSelected={isSelected}
               onSelect={selectHandler}
+              onDragMove={onDragMove}
+              onDragEnd={onDragEnd}
             />
           )
         }
@@ -183,6 +193,8 @@ export default function OverlayLayer({ selectedOverlayId, onSelectOverlay }: Ove
               overlay={overlay}
               isSelected={isSelected}
               onSelect={selectHandler}
+              onDragMove={onDragMove}
+              onDragEnd={onDragEnd}
             />
           )
         }

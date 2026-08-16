@@ -16,8 +16,15 @@ type CanvasExportFn = (
   deviceId?: string
 ) => string | null | Promise<string | null>
 
+type CanvasPanelExportFn = (
+  pixelRatio?: number,
+  targetWidth?: number,
+  targetHeight?: number
+) => Array<{ id: string; dataURL: string }> | Promise<Array<{ id: string; dataURL: string }>>
+
 interface Window {
   __canvasExport?: CanvasExportFn
+  __canvasExportPanels?: CanvasPanelExportFn
   __canvasExportMime?: string
   __canvasStage?: unknown
 }

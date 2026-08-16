@@ -1,15 +1,18 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useCanvasStore } from '../../store/useCanvasStore'
 import { getDeviceById } from '../../lib/devices'
 import DeviceSlab from './DeviceSlab'
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
 
-export default function RotationStudio() {
-  const { selectedDeviceId, deviceVariant, deviceRotation, setDeviceAngle, setDeviceRotation } = useCanvasStore()
+export default function RotationStudio({ floating = false }: { floating?: boolean }) {
+  const { activeBoxId, selectedDeviceId, deviceVariant, deviceRotation, setDeviceAngle, setDeviceRotation } = useCanvasStore()
   const [draft, setDraft] = useState(deviceRotation)
   const dragStart = useRef<{ x: number; y: number; yaw: number; pitch: number; roll: number; angle: number; mode: 'orbit' | 'roll' } | null>(null)
   const device = getDeviceById(selectedDeviceId)
+  useEffect(() => {
+    setDraft(deviceRotation)
+  }, [activeBoxId, deviceRotation])
   if (!device) return null
 
   const commit = () => {
@@ -18,7 +21,9 @@ export default function RotationStudio() {
   }
 
   return (
-    <aside className="absolute right-3 top-14 z-20 w-48 rounded-xl border border-white/70 bg-white/90 p-3 shadow-lg shadow-black/10 backdrop-blur-md">
+    <section className={floating
+      ? 'absolute right-3 top-14 z-20 w-48 rounded-xl border border-white/70 bg-white/90 p-3 shadow-lg shadow-black/10 backdrop-blur-md'
+      : 'rounded-lg border border-border bg-surface/40 p-3'}>
       <div className="mb-2 flex items-baseline justify-between">
         <div>
           <p className="text-xs font-semibold text-primary">Rotation studio</p>
@@ -82,6 +87,6 @@ export default function RotationStudio() {
           className="flex-1 rounded-md bg-primary px-2 py-1.5 text-[10px] font-semibold text-white transition-opacity hover:opacity-85"
         >Capture view</button>
       </div>
-    </aside>
+    </section>
   )
 }

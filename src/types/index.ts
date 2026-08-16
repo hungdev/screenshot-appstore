@@ -58,6 +58,40 @@ export interface Overlay {
   imageSrc?: string
 }
 
+// Independent mockup boxes placed on the export artboard.
+export interface MockupBox {
+  id: string
+  x: number
+  y: number
+  width: number
+  height: number
+  deviceX?: number
+  deviceY?: number
+  deviceId?: string
+  deviceAngle?: DeviceAngle
+  deviceRotation?: DeviceRotation
+  scale: number
+  screenshot: string | null
+  screenshotWidth: number
+  screenshotHeight: number
+  screenshotMime: string
+}
+
+export interface MockupDevice {
+  id: string
+  panelId: string
+  x: number
+  y: number
+  scale: number
+  deviceId: string
+  deviceAngle: DeviceAngle
+  deviceRotation: DeviceRotation
+  screenshot: string | null
+  screenshotWidth: number
+  screenshotHeight: number
+  screenshotMime: string
+}
+
 // Notion capture options
 export interface NotionCaptureOptions {
   pageId: string
@@ -146,6 +180,9 @@ export interface CanvasConfig {
   zoom: number
   deviceShadow?: boolean
   screenshotCornerRadius?: number | null
+  boxes?: MockupBox[]
+  panelGap?: number
+  devices?: MockupDevice[]
 }
 
 export type DeviceAngle = 'front' | 'tilt-left' | 'tilt-right' | 'flat-left' | 'flat-right' | 'custom'
