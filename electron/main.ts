@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, session } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeImage, shell, session } from 'electron'
 import { join } from 'path'
 import { readFileSync, existsSync } from 'fs'
 
@@ -185,6 +185,13 @@ declare global {
 }
 
 app.whenReady().then(() => {
+  // The packaged macOS app reads build/icon.icns automatically. Set the same
+  // artwork explicitly in development so the Dock does not show Electron.
+  if (process.platform === 'darwin') {
+    const icon = nativeImage.createFromPath(join(process.cwd(), 'build', 'icon.png'))
+    if (!icon.isEmpty()) app.dock?.setIcon(icon)
+  }
+
   createWindow()
 
   // Register IPC handlers
